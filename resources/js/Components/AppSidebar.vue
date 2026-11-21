@@ -22,14 +22,31 @@ const navigationItems = computed(() => {
             href: '/dashboard',
             active: page.url === '/dashboard',
         },
+        {
+            name: 'Periode Ujian',
+            href: '/exam-periods',
+            active: page.url.startsWith('/exam-periods'),
+        },
+        {
+            name: 'Data Referensi',
+            href: '/master-data',
+            active: page.url.startsWith('/master-data'),
+        },
     ];
 
     if (isAdmin.value) {
-        items.push({
-            name: 'Pengguna',
-            href: '/users',
-            active: page.url.startsWith('/users'),
-        });
+        items.push(
+            {
+                name: 'Profil Sekolah',
+                href: '/school-profile',
+                active: page.url.startsWith('/school-profile'),
+            },
+            {
+                name: 'Pengguna',
+                href: '/users',
+                active: page.url.startsWith('/users'),
+            }
+        );
     }
 
     return items;
