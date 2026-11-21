@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentFileController;
+use App\Http\Controllers\ExamDocumentController;
 use App\Http\Controllers\ExamPeriodController;
 use App\Http\Controllers\MasterDataController;
 use App\Http\Controllers\SchoolProfileController;
@@ -30,6 +32,14 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::put('/exam-periods/{examPeriod}', [ExamPeriodController::class, 'update'])->name('exam-periods.update');
     Route::patch('/exam-periods/{examPeriod}/archive', [ExamPeriodController::class, 'archive'])->name('exam-periods.archive');
     Route::patch('/exam-periods/{examPeriod}/reopen', [ExamPeriodController::class, 'reopen'])->name('exam-periods.reopen');
+
+    // Dokumen Soal & Unduhan File Privat (Admin & Operator)
+    Route::get('/exam-documents', [ExamDocumentController::class, 'index'])->name('exam-documents.index');
+    Route::get('/exam-documents/create', [ExamDocumentController::class, 'create'])->name('exam-documents.create');
+    Route::post('/exam-documents', [ExamDocumentController::class, 'store'])->name('exam-documents.store');
+    Route::get('/exam-documents/{examDocument}', [ExamDocumentController::class, 'show'])->name('exam-documents.show');
+    Route::put('/exam-documents/{examDocument}', [ExamDocumentController::class, 'update'])->name('exam-documents.update');
+    Route::get('/document-files/{documentFile}/download', [DocumentFileController::class, 'download'])->name('document-files.download');
 
     // Data Referensi Mapel & Kelas (Admin & Operator)
     Route::get('/master-data', [MasterDataController::class, 'index'])->name('master-data.index');

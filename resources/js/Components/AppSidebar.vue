@@ -28,6 +28,11 @@ const navigationItems = computed(() => {
             active: page.url.startsWith('/exam-periods'),
         },
         {
+            name: 'Dokumen Soal',
+            href: '/exam-documents',
+            active: page.url.startsWith('/exam-documents'),
+        },
+        {
             name: 'Data Referensi',
             href: '/master-data',
             active: page.url.startsWith('/master-data'),
