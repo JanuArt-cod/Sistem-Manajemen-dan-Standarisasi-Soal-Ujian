@@ -8,8 +8,10 @@ use App\Enums\ExamPeriodStatus;
 use App\Http\Requests\ExamDocuments\StoreExamDocumentRequest;
 use App\Http\Requests\ExamDocuments\UpdateExamDocumentRequest;
 use App\Models\DocumentFile;
+use App\Models\DocumentTemplate;
 use App\Models\ExamDocument;
 use App\Models\ExamPeriod;
+use App\Models\FormattingPreset;
 use App\Models\SchoolClass;
 use App\Models\Subject;
 use App\Services\Storage\PrivateDocumentStorageService;
@@ -183,6 +185,7 @@ class ExamDocumentController extends Controller
             'uploader:id,name',
             'approver:id,name',
             'sourceFile',
+            'processingConfig.configuredBy:id,name',
         ]);
 
         $source = $examDocument->sourceFile;
@@ -196,6 +199,8 @@ class ExamDocumentController extends Controller
                 ->whereHas('examDocument', fn ($q) => $q->where('exam_period_id', $examDocument->exam_period_id))
                 ->exists();
         }
+
+        $activeConfig = $examDocument->processingConfig;
 
         return Inertia::render('ExamDocuments/Show', [
             'document' => [
@@ -230,6 +235,16 @@ class ExamDocumentController extends Controller
                     'checksum_sha256' => $source->checksum_sha256,
                     'download_url' => route('document-files.download', $source->id),
                 ] : null,
+                'processing_config' => $activeConfig ? [
+                    'id' => $activeConfig->id,
+                    'formatting_preset_id' => $activeConfig->formatting_preset_id,
+                    'document_template_id' => $activeConfig->document_template_id,
+                    'preset_snapshot' => $activeConfig->preset_snapshot,
+                    'template_snapshot' => $activeConfig->template_snapshot,
+                    'overrides' => $activeConfig->overrides,
+                    'configured_by_name' => $activeConfig->configuredBy?->name ?? '-',
+                    'updated_at' => $activeConfig->updated_at?->format('d M Y H:i'),
+                ] : null,
             ],
             'subjects' => Subject::query()
                 ->where('is_active', true)
@@ -239,6 +254,32 @@ class ExamDocumentController extends Controller
                 ->where('is_active', true)
                 ->orderBy('name')
                 ->get(['id', 'name']),
+            'presets' => FormattingPreset::query()
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get([
+                    'id',
+                    'name',
+                    'paper_size',
+                    'paper_width_mm',
+                    'paper_height_mm',
+                    'font_family',
+                    'font_size_pt',
+                    'line_spacing',
+                    'is_default',
+                ]),
+            'templates' => DocumentTemplate::query()
+                ->where('is_active', true)
+                ->orderByDesc('is_default')
+                ->orderBy('name')
+                ->get([
+                    'id',
+                    'name',
+                    'header_mode',
+                    'show_identity_box',
+                    'is_default',
+                ]),
         ]);
     }
 

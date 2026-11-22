@@ -33,6 +33,16 @@ const navigationItems = computed(() => {
             active: page.url.startsWith('/exam-documents'),
         },
         {
+            name: 'Preset Format',
+            href: '/formatting-presets',
+            active: page.url.startsWith('/formatting-presets'),
+        },
+        {
+            name: 'Template Kop',
+            href: '/document-templates',
+            active: page.url.startsWith('/document-templates'),
+        },
+        {
             name: 'Data Referensi',
             href: '/master-data',
             active: page.url.startsWith('/master-data'),

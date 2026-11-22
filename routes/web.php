@@ -3,8 +3,11 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
+use App\Http\Controllers\DocumentProcessingConfigController;
+use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\ExamDocumentController;
 use App\Http\Controllers\ExamPeriodController;
+use App\Http\Controllers\FormattingPresetController;
 use App\Http\Controllers\MasterDataController;
 use App\Http\Controllers\SchoolProfileController;
 use App\Http\Controllers\UserController;
@@ -33,13 +36,20 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/exam-periods/{examPeriod}/archive', [ExamPeriodController::class, 'archive'])->name('exam-periods.archive');
     Route::patch('/exam-periods/{examPeriod}/reopen', [ExamPeriodController::class, 'reopen'])->name('exam-periods.reopen');
 
-    // Dokumen Soal & Unduhan File Privat (Admin & Operator)
+    // Dokumen Soal, Konfigurasi Snapshot & Unduhan File Privat (Admin & Operator)
     Route::get('/exam-documents', [ExamDocumentController::class, 'index'])->name('exam-documents.index');
     Route::get('/exam-documents/create', [ExamDocumentController::class, 'create'])->name('exam-documents.create');
     Route::post('/exam-documents', [ExamDocumentController::class, 'store'])->name('exam-documents.store');
     Route::get('/exam-documents/{examDocument}', [ExamDocumentController::class, 'show'])->name('exam-documents.show');
     Route::put('/exam-documents/{examDocument}', [ExamDocumentController::class, 'update'])->name('exam-documents.update');
+    Route::put('/exam-documents/{examDocument}/processing-config', [DocumentProcessingConfigController::class, 'update'])
+        ->name('exam-documents.processing-config.update');
     Route::get('/document-files/{documentFile}/download', [DocumentFileController::class, 'download'])->name('document-files.download');
+
+    // Preset Format & Template Kop (Dapat dilihat Admin & Operator; dikelola Admin)
+    Route::get('/formatting-presets', [FormattingPresetController::class, 'index'])->name('formatting-presets.index');
+    Route::get('/document-templates', [DocumentTemplateController::class, 'index'])->name('document-templates.index');
+    Route::get('/document-templates/{documentTemplate}/download', [DocumentTemplateController::class, 'download'])->name('document-templates.download');
 
     // Data Referensi Mapel & Kelas (Admin & Operator)
     Route::get('/master-data', [MasterDataController::class, 'index'])->name('master-data.index');
@@ -53,6 +63,14 @@ Route::middleware(['auth', 'active'])->group(function () {
 
     // Khusus Administrator
     Route::middleware('role:ADMIN')->group(function () {
+        Route::post('/formatting-presets', [FormattingPresetController::class, 'store'])->name('formatting-presets.store');
+        Route::put('/formatting-presets/{formattingPreset}', [FormattingPresetController::class, 'update'])->name('formatting-presets.update');
+        Route::patch('/formatting-presets/{formattingPreset}/default', [FormattingPresetController::class, 'setDefault'])->name('formatting-presets.default');
+
+        Route::post('/document-templates', [DocumentTemplateController::class, 'store'])->name('document-templates.store');
+        Route::put('/document-templates/{documentTemplate}', [DocumentTemplateController::class, 'update'])->name('document-templates.update');
+        Route::patch('/document-templates/{documentTemplate}/default', [DocumentTemplateController::class, 'setDefault'])->name('document-templates.default');
+
         Route::get('/school-profile', [SchoolProfileController::class, 'edit'])->name('school-profile.edit');
         Route::put('/school-profile', [SchoolProfileController::class, 'update'])->name('school-profile.update');
 

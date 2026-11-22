@@ -82,4 +82,16 @@ class ExamDocument extends Model
             ->where('is_current', true)
             ->latest('id');
     }
+
+    public function processingConfigs(): HasMany
+    {
+        return $this->hasMany(DocumentProcessingConfig::class);
+    }
+
+    public function processingConfig(): HasOne
+    {
+        return $this->hasOne(DocumentProcessingConfig::class)
+            ->where('is_current', true)
+            ->latest('id');
+    }
 }
