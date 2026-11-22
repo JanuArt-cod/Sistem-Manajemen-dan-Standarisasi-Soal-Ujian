@@ -3,8 +3,10 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
+use App\Http\Controllers\DocumentPdfExportController;
 use App\Http\Controllers\DocumentProcessingConfigController;
 use App\Http\Controllers\DocumentProcessingController;
+use App\Http\Controllers\DocumentReviewController;
 use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\ExamDocumentController;
 use App\Http\Controllers\ExamPeriodController;
@@ -37,7 +39,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/exam-periods/{examPeriod}/archive', [ExamPeriodController::class, 'archive'])->name('exam-periods.archive');
     Route::patch('/exam-periods/{examPeriod}/reopen', [ExamPeriodController::class, 'reopen'])->name('exam-periods.reopen');
 
-    // Dokumen Soal, Konfigurasi Snapshot, Proses Standarisasi & Unduhan File Privat (Admin & Operator)
+    // Dokumen Soal, Konfigurasi Snapshot, Standarisasi, Ekspor PDF, Review & Unduhan/Pratinjau Privat
     Route::get('/exam-documents', [ExamDocumentController::class, 'index'])->name('exam-documents.index');
     Route::get('/exam-documents/create', [ExamDocumentController::class, 'create'])->name('exam-documents.create');
     Route::post('/exam-documents', [ExamDocumentController::class, 'store'])->name('exam-documents.store');
@@ -47,7 +49,14 @@ Route::middleware(['auth', 'active'])->group(function () {
         ->name('exam-documents.processing-config.update');
     Route::post('/exam-documents/{examDocument}/process', [DocumentProcessingController::class, 'store'])
         ->name('exam-documents.process');
+    Route::post('/exam-documents/{examDocument}/export-pdf', [DocumentPdfExportController::class, 'store'])
+        ->name('exam-documents.export-pdf');
+    Route::patch('/exam-documents/{examDocument}/warnings/{documentWarning}/resolve', [DocumentReviewController::class, 'resolveWarning'])
+        ->name('exam-documents.warnings.resolve');
+    Route::post('/exam-documents/{examDocument}/review', [DocumentReviewController::class, 'store'])
+        ->name('exam-documents.review');
     Route::get('/document-files/{documentFile}/download', [DocumentFileController::class, 'download'])->name('document-files.download');
+    Route::get('/document-files/{documentFile}/preview', [DocumentFileController::class, 'preview'])->name('document-files.preview');
 
     // Preset Format & Template Kop (Dapat dilihat Admin & Operator; dikelola Admin)
     Route::get('/formatting-presets', [FormattingPresetController::class, 'index'])->name('formatting-presets.index');

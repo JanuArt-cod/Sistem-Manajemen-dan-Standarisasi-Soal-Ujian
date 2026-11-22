@@ -18,6 +18,7 @@ class DocumentWarning extends Model
         'is_resolved',
         'resolved_by',
         'resolved_at',
+        'resolution_note',
     ];
 
     /**
@@ -42,7 +43,7 @@ class DocumentWarning extends Model
         return $this->belongsTo(DocumentProcessingRun::class, 'document_processing_run_id');
     }
 
-    public function resolver(): BelongsTo
+    public function resolvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'resolved_by');
     }

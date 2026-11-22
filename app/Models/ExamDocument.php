@@ -29,6 +29,9 @@ class ExamDocument extends Model
         'uploaded_by',
         'approved_by',
         'approved_at',
+        'reviewed_by',
+        'reviewed_at',
+        'review_notes',
     ];
 
     /**
@@ -42,6 +45,7 @@ class ExamDocument extends Model
             'source_format' => DocumentSourceFormat::class,
             'current_status' => DocumentStatus::class,
             'approved_at' => 'datetime',
+            'reviewed_at' => 'datetime',
         ];
     }
 
@@ -70,6 +74,11 @@ class ExamDocument extends Model
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'reviewed_by');
+    }
+
     public function files(): HasMany
     {
         return $this->hasMany(DocumentFile::class);
@@ -87,6 +96,14 @@ class ExamDocument extends Model
     {
         return $this->hasOne(DocumentFile::class)
             ->where('file_role', DocumentFileRole::OUTPUT_DOCX)
+            ->where('is_current', true)
+            ->latest('id');
+    }
+
+    public function outputPdfFile(): HasOne
+    {
+        return $this->hasOne(DocumentFile::class)
+            ->where('file_role', DocumentFileRole::OUTPUT_PDF)
             ->where('is_current', true)
             ->latest('id');
     }

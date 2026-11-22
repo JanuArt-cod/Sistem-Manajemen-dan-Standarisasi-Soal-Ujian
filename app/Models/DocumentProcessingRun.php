@@ -17,6 +17,7 @@ class DocumentProcessingRun extends Model
         'triggered_by',
         'target_type',
         'status',
+        'pdf_status',
         'engine_name',
         'engine_version',
         'python_version',
@@ -24,9 +25,11 @@ class DocumentProcessingRun extends Model
         'libreoffice_version',
         'input_checksum_sha256',
         'output_docx_checksum_sha256',
+        'output_pdf_checksum_sha256',
         'needs_manual_review',
         'metrics_json',
         'error_message',
+        'pdf_error_message',
         'started_at',
         'finished_at',
         'duration_ms',
@@ -71,5 +74,11 @@ class DocumentProcessingRun extends Model
     {
         return $this->hasOne(DocumentFile::class, 'processing_run_id')
             ->where('file_role', DocumentFileRole::OUTPUT_DOCX);
+    }
+
+    public function outputPdfFile(): HasOne
+    {
+        return $this->hasOne(DocumentFile::class, 'processing_run_id')
+            ->where('file_role', DocumentFileRole::OUTPUT_PDF);
     }
 }

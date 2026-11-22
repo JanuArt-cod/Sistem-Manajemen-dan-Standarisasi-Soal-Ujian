@@ -43,6 +43,7 @@ class ExamDocumentController extends Controller
                 'uploader:id,name',
                 'sourceFile',
                 'outputDocxFile',
+                'outputPdfFile',
             ])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($sub) use ($search) {
@@ -61,6 +62,7 @@ class ExamDocumentController extends Controller
             ->through(function (ExamDocument $doc) {
                 $source = $doc->sourceFile;
                 $outputDocx = $doc->outputDocxFile;
+                $outputPdf = $doc->outputPdfFile;
 
                 return [
                     'id' => $doc->id,
@@ -83,6 +85,12 @@ class ExamDocumentController extends Controller
                         'original_filename' => $outputDocx->original_filename,
                         'human_size' => $outputDocx->humanSize(),
                         'download_url' => route('document-files.download', $outputDocx->id),
+                    ] : null,
+                    'output_pdf_file' => $outputPdf ? [
+                        'id' => $outputPdf->id,
+                        'original_filename' => $outputPdf->original_filename,
+                        'human_size' => $outputPdf->humanSize(),
+                        'download_url' => route('document-files.download', $outputPdf->id),
                     ] : null,
                     'created_at' => $doc->created_at?->format('d M Y H:i'),
                 ];
@@ -194,18 +202,22 @@ class ExamDocumentController extends Controller
             'schoolClass:id,name,level',
             'uploader:id,name',
             'approver:id,name',
+            'reviewer:id,name',
             'sourceFile',
             'outputDocxFile',
+            'outputPdfFile',
             'processingConfig.configurator:id,name',
             'processingRuns' => fn ($q) => $q->with([
                 'triggeredBy:id,name',
-                'warnings',
+                'warnings.resolvedBy:id,name',
                 'outputDocxFile',
+                'outputPdfFile',
             ])->limit(10),
         ]);
 
         $source = $examDocument->sourceFile;
         $outputDocx = $examDocument->outputDocxFile;
+        $outputPdf = $examDocument->outputPdfFile;
         $duplicateExists = false;
 
         if ($source) {
@@ -222,6 +234,13 @@ class ExamDocumentController extends Controller
         $isArchived = $examDocument->examPeriod?->status === ExamPeriodStatus::ARCHIVED;
         $isBusy = in_array($examDocument->current_status, [DocumentStatus::QUEUED, DocumentStatus::PROCESSING], true);
         $canEdit = $request->user()->can('update', $examDocument) && ! $isArchived;
+        $canReview = $canEdit && $outputDocx !== null && ! in_array($examDocument->current_status, [
+            DocumentStatus::UPLOADED,
+            DocumentStatus::VALIDATION_FAILED,
+            DocumentStatus::QUEUED,
+            DocumentStatus::PROCESSING,
+            DocumentStatus::FAILED,
+        ], true);
 
         return Inertia::render('ExamDocuments/Show', [
             'document' => [
@@ -246,9 +265,16 @@ class ExamDocumentController extends Controller
                     'status' => $examDocument->examPeriod->status->value,
                 ],
                 'uploader_name' => $examDocument->uploader?->name ?? '-',
+                'approver_name' => $examDocument->approver?->name,
+                'approved_at' => $examDocument->approved_at?->format('d M Y H:i'),
+                'reviewer_name' => $examDocument->reviewer?->name,
+                'reviewed_at' => $examDocument->reviewed_at?->format('d M Y H:i'),
+                'review_notes' => $examDocument->review_notes,
                 'created_at' => $examDocument->created_at?->format('d M Y H:i'),
                 'can_edit' => $canEdit,
                 'can_process' => $canEdit && $source !== null && ! $isBusy,
+                'can_export_pdf' => $canEdit && $outputDocx !== null && ! $isBusy,
+                'can_review' => $canReview,
                 'duplicate_warning' => $duplicateExists,
                 'source_file' => $source ? [
                     'id' => $source->id,
@@ -265,6 +291,15 @@ class ExamDocumentController extends Controller
                     'checksum_sha256' => $outputDocx->checksum_sha256,
                     'created_at' => $outputDocx->created_at?->format('d M Y H:i'),
                     'download_url' => route('document-files.download', $outputDocx->id),
+                ] : null,
+                'output_pdf_file' => $outputPdf ? [
+                    'id' => $outputPdf->id,
+                    'original_filename' => $outputPdf->original_filename,
+                    'human_size' => $outputPdf->humanSize(),
+                    'checksum_sha256' => $outputPdf->checksum_sha256,
+                    'created_at' => $outputPdf->created_at?->format('d M Y H:i'),
+                    'download_url' => route('document-files.download', $outputPdf->id),
+                    'preview_url' => route('document-files.preview', $outputPdf->id),
                 ] : null,
                 'processing_config' => $activeConfig ? [
                     'id' => $activeConfig->id,
@@ -329,19 +364,25 @@ class ExamDocumentController extends Controller
             'target_type' => $run->target_type,
             'status' => $run->status->value,
             'status_label' => $run->status->label(),
+            'pdf_status' => $run->pdf_status,
             'engine_name' => $run->engine_name,
             'engine_version' => $run->engine_version,
             'python_version' => $run->python_version,
             'docx_library_version' => $run->docx_library_version,
+            'libreoffice_version' => $run->libreoffice_version,
             'needs_manual_review' => $run->needs_manual_review,
             'metrics' => $run->metrics_json,
             'error_message' => $run->error_message,
+            'pdf_error_message' => $run->pdf_error_message,
             'duration_ms' => $run->duration_ms,
             'triggered_by_name' => $run->triggeredBy?->name ?? 'Sistem',
             'created_at' => $run->created_at?->format('d M Y H:i'),
             'finished_at' => $run->finished_at?->format('d M Y H:i'),
             'output_docx_url' => $run->outputDocxFile
                 ? route('document-files.download', $run->outputDocxFile->id)
+                : null,
+            'output_pdf_url' => $run->outputPdfFile
+                ? route('document-files.download', $run->outputPdfFile->id)
                 : null,
             'warnings' => $run->warnings->map(fn (DocumentWarning $w) => [
                 'id' => $w->id,
@@ -350,6 +391,10 @@ class ExamDocumentController extends Controller
                 'severity_label' => $w->severity->label(),
                 'message' => $w->message,
                 'location' => $w->location,
+                'is_resolved' => (bool) $w->is_resolved,
+                'resolved_by_name' => $w->resolvedBy?->name,
+                'resolved_at' => $w->resolved_at?->format('d M Y H:i'),
+                'resolution_note' => $w->resolution_note,
             ])->values(),
         ];
     }

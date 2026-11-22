@@ -6,9 +6,11 @@ use App\Enums\DocumentFileRole;
 use App\Enums\DocumentStatus;
 use App\Enums\ProcessingRunStatus;
 use App\Enums\WarningSeverity;
+use App\Exceptions\PdfConversionException;
 use App\Models\DocumentFile;
 use App\Models\DocumentProcessingRun;
 use App\Models\DocumentWarning;
+use App\Models\ExamDocument;
 use App\Services\FormattingSnapshotBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -22,11 +24,13 @@ use Throwable;
 class DocxStandardizationService
 {
     public function __construct(
-        private readonly FormattingSnapshotBuilder $snapshotBuilder
+        private readonly FormattingSnapshotBuilder $snapshotBuilder,
+        private readonly LibreOfficePdfConverter $pdfConverter
     ) {}
 
     /**
-     * Menjalankan standarisasi DOCX untuk satu eksekusi DocumentProcessingRun di direktori kerja terisolasi.
+     * Menjalankan standarisasi DOCX diikuti konversi PDF di direktori kerja terisolasi.
+     * Jika konversi PDF gagal, hasil DOCX tetap dipertahankan dan status dokumen menjadi PDF_FAILED.
      */
     public function executeRun(DocumentProcessingRun $run): DocumentProcessingRun
     {
@@ -35,8 +39,10 @@ class DocxStandardizationService
 
         $run->update([
             'status' => ProcessingRunStatus::PROCESSING,
+            'pdf_status' => 'PENDING',
             'started_at' => now(),
             'error_message' => null,
+            'pdf_error_message' => null,
         ]);
 
         $examDocument->update([
@@ -183,7 +189,8 @@ class DocxStandardizationService
 
             $needsManualReview = (bool) ($report['needs_manual_review'] ?? false);
             $warningsData = is_array($report['warnings'] ?? null) ? $report['warnings'] : [];
-            $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+            $stem = pathinfo($sourceFile->original_filename, PATHINFO_FILENAME);
+            $safeStem = Str::slug($stem, '_') ?: ('dokumen_' . $examDocument->id);
 
             DB::transaction(function () use (
                 $run,
@@ -193,19 +200,16 @@ class DocxStandardizationService
                 $outputStoragePath,
                 $outputSize,
                 $outputChecksum,
+                $safeStem,
                 $report,
                 $engineStatus,
                 $needsManualReview,
-                $warningsData,
-                $durationMs
+                $warningsData
             ) {
                 DocumentFile::query()
                     ->where('exam_document_id', $examDocument->id)
                     ->where('file_role', DocumentFileRole::OUTPUT_DOCX)
                     ->update(['is_current' => false]);
-
-                $stem = pathinfo($sourceFile->original_filename, PATHINFO_FILENAME);
-                $safeStem = Str::slug($stem, '_') ?: ('dokumen_' . $examDocument->id);
 
                 DocumentFile::query()->create([
                     'exam_document_id' => $examDocument->id,
@@ -256,16 +260,20 @@ class DocxStandardizationService
                     'needs_manual_review' => $needsManualReview,
                     'metrics_json' => is_array($report['metrics'] ?? null) ? $report['metrics'] : [],
                     'error_message' => null,
-                    'finished_at' => now(),
-                    'duration_ms' => $durationMs,
-                ]);
-
-                $examDocument->update([
-                    'current_status' => $needsManualReview
-                        ? DocumentStatus::NEEDS_REVIEW
-                        : DocumentStatus::PROCESSED,
                 ]);
             });
+
+            // Langkah 2 Terisolasi: Konversi DOCX terstandarisasi ke PDF menggunakan LibreOffice
+            $this->convertAndPersistPdf(
+                $run,
+                $examDocument,
+                $tempOutputPath,
+                $workDir,
+                $outputStorageDisk,
+                $safeStem,
+                $needsManualReview,
+                $startTime
+            );
         } catch (Throwable $e) {
             $durationMs = (int) round((microtime(true) - $startTime) * 1000);
 
@@ -277,6 +285,7 @@ class DocxStandardizationService
 
             $run->update([
                 'status' => ProcessingRunStatus::FAILED,
+                'pdf_status' => 'SKIPPED',
                 'error_message' => Str::limit($e->getMessage(), 1000),
                 'finished_at' => now(),
                 'duration_ms' => $durationMs,
@@ -291,6 +300,209 @@ class DocxStandardizationService
             }
         }
 
-        return $run->fresh(['warnings', 'outputDocxFile']);
+        return $run->fresh(['warnings', 'outputDocxFile', 'outputPdfFile']);
+    }
+
+    /**
+     * Mengekspor ulang PDF dari file OUTPUT_DOCX yang sudah tersedia tanpa mengubah file sumber maupun DOCX.
+     */
+    public function exportPdfOnly(ExamDocument $examDocument, ?int $triggeredBy = null): DocumentProcessingRun
+    {
+        $startTime = microtime(true);
+        $examDocument->loadMissing(['outputDocxFile', 'sourceFile', 'processingConfig']);
+
+        $outputDocx = $examDocument->outputDocxFile;
+        if ($outputDocx === null) {
+            throw new RuntimeException('File hasil standarisasi DOCX belum tersedia untuk diekspor ke PDF.');
+        }
+
+        $docxDisk = Storage::disk($outputDocx->storage_disk);
+        if (! $docxDisk->exists($outputDocx->storage_path)) {
+            throw new RuntimeException('Berkas hasil DOCX tidak ditemukan di penyimpanan privat.');
+        }
+
+        $latestDocxRun = DocumentProcessingRun::query()
+            ->where('exam_document_id', $examDocument->id)
+            ->where('target_type', 'DOCX')
+            ->whereNotNull('output_docx_checksum_sha256')
+            ->latest('id')
+            ->first();
+
+        $needsManualReview = (bool) ($latestDocxRun?->needs_manual_review ?? false);
+
+        $run = DocumentProcessingRun::query()->create([
+            'exam_document_id' => $examDocument->id,
+            'document_processing_config_id' => $examDocument->processingConfig?->id,
+            'triggered_by' => $triggeredBy,
+            'target_type' => 'PDF',
+            'status' => ProcessingRunStatus::PROCESSING,
+            'pdf_status' => 'PENDING',
+            'input_checksum_sha256' => $outputDocx->checksum_sha256,
+            'output_docx_checksum_sha256' => $outputDocx->checksum_sha256,
+            'needs_manual_review' => $needsManualReview,
+            'started_at' => now(),
+        ]);
+
+        $workDir = storage_path('app/private/tmp_runs/pdf_run_' . $run->id . '_' . Str::uuid());
+
+        try {
+            File::ensureDirectoryExists($workDir);
+            $tempDocxPath = $workDir . DIRECTORY_SEPARATOR . 'standardized.docx';
+            file_put_contents($tempDocxPath, (string) $docxDisk->get($outputDocx->storage_path));
+
+            $baseName = $examDocument->sourceFile
+                ? pathinfo($examDocument->sourceFile->original_filename, PATHINFO_FILENAME)
+                : ('dokumen_' . $examDocument->id);
+            $safeStem = Str::slug($baseName, '_') ?: ('dokumen_' . $examDocument->id);
+
+            $this->convertAndPersistPdf(
+                $run,
+                $examDocument,
+                $tempDocxPath,
+                $workDir,
+                $outputDocx->storage_disk,
+                $safeStem,
+                $needsManualReview,
+                $startTime
+            );
+        } finally {
+            if (File::isDirectory($workDir)) {
+                File::deleteDirectory($workDir);
+            }
+        }
+
+        return $run->fresh(['warnings', 'outputDocxFile', 'outputPdfFile']);
+    }
+
+    private function convertAndPersistPdf(
+        DocumentProcessingRun $run,
+        ExamDocument $examDocument,
+        string $docxAbsPath,
+        string $workDir,
+        string $storageDisk,
+        string $safeStem,
+        bool $needsManualReview,
+        float $startTime
+    ): void {
+        try {
+            $conversion = $this->pdfConverter->convertDocxToPdf($docxAbsPath, $workDir);
+            $pdfBinary = (string) file_get_contents($conversion['pdf_path']);
+            $pdfChecksum = hash('sha256', $pdfBinary);
+            $pdfSize = strlen($pdfBinary);
+
+            $pdfStoragePath = sprintf(
+                'exam-documents/%d/outputs/%s.pdf',
+                $examDocument->exam_period_id,
+                Str::uuid()->toString()
+            );
+
+            $storedPdf = Storage::disk($storageDisk)->put($pdfStoragePath, $pdfBinary);
+            if (! $storedPdf) {
+                throw new PdfConversionException(
+                    'INSUFFICIENT_STORAGE',
+                    'Gagal menyimpan hasil cetak PDF ke penyimpanan privat.'
+                );
+            }
+
+            $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+
+            DB::transaction(function () use (
+                $run,
+                $examDocument,
+                $storageDisk,
+                $pdfStoragePath,
+                $pdfSize,
+                $pdfChecksum,
+                $safeStem,
+                $conversion,
+                $needsManualReview,
+                $durationMs
+            ) {
+                DocumentFile::query()
+                    ->where('exam_document_id', $examDocument->id)
+                    ->where('file_role', DocumentFileRole::OUTPUT_PDF)
+                    ->update(['is_current' => false]);
+
+                DocumentFile::query()->create([
+                    'exam_document_id' => $examDocument->id,
+                    'processing_run_id' => $run->id,
+                    'file_role' => DocumentFileRole::OUTPUT_PDF,
+                    'original_filename' => "STD_{$safeStem}.pdf",
+                    'storage_disk' => $storageDisk,
+                    'storage_path' => $pdfStoragePath,
+                    'mime_type' => 'application/pdf',
+                    'extension' => 'pdf',
+                    'size_bytes' => $pdfSize,
+                    'checksum_sha256' => $pdfChecksum,
+                    'is_current' => true,
+                    'created_by' => $run->triggered_by,
+                ]);
+
+                $nextRunStatus = $run->status === ProcessingRunStatus::PROCESSING
+                    ? ProcessingRunStatus::COMPLETED
+                    : $run->status;
+
+                $run->update([
+                    'status' => $nextRunStatus,
+                    'pdf_status' => 'COMPLETED',
+                    'libreoffice_version' => $conversion['libreoffice_version'],
+                    'output_pdf_checksum_sha256' => $pdfChecksum,
+                    'pdf_error_message' => null,
+                    'finished_at' => now(),
+                    'duration_ms' => $durationMs,
+                ]);
+
+                $examDocument->update([
+                    'current_status' => $needsManualReview
+                        ? DocumentStatus::NEEDS_REVIEW
+                        : DocumentStatus::PROCESSED,
+                ]);
+            });
+        } catch (Throwable $pdfException) {
+            $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+            $errorCode = $pdfException instanceof PdfConversionException
+                ? $pdfException->errorCode
+                : 'PDF_CONVERSION_FAILED';
+            $userMessage = $pdfException instanceof PdfConversionException
+                ? $pdfException->getMessage()
+                : 'Konversi PDF gagal dijalankan. Hasil DOCX tetap tersedia untuk diunduh.';
+
+            Log::warning('SIMSOAL PDF export failed while preserving DOCX output', [
+                'run_id' => $run->id,
+                'exam_document_id' => $examDocument->id,
+                'error_code' => $errorCode,
+                'message' => $pdfException->getMessage(),
+            ]);
+
+            DB::transaction(function () use ($run, $examDocument, $errorCode, $userMessage, $durationMs) {
+                DocumentWarning::query()->create([
+                    'exam_document_id' => $examDocument->id,
+                    'document_processing_run_id' => $run->id,
+                    'code' => $errorCode,
+                    'severity' => WarningSeverity::WARNING,
+                    'message' => $userMessage,
+                    'location' => 'Ekspor PDF',
+                    'is_resolved' => false,
+                ]);
+
+                $nextRunStatus = $run->target_type === 'PDF'
+                    ? ProcessingRunStatus::FAILED
+                    : ProcessingRunStatus::COMPLETED_WITH_WARNINGS;
+
+                $run->update([
+                    'status' => $nextRunStatus,
+                    'pdf_status' => 'FAILED',
+                    'pdf_error_message' => Str::limit($userMessage, 1000),
+                    'error_message' => $run->target_type === 'PDF' ? Str::limit($userMessage, 1000) : $run->error_message,
+                    'finished_at' => now(),
+                    'duration_ms' => $durationMs,
+                ]);
+
+                // Tetap tandai PDF_FAILED namun OUTPUT_DOCX tetap valid dan dapat diunduh
+                $examDocument->update([
+                    'current_status' => DocumentStatus::PDF_FAILED,
+                ]);
+            });
+        }
     }
 }

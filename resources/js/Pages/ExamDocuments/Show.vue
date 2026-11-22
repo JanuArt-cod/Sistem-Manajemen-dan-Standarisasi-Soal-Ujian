@@ -1,7 +1,9 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3';
 import DocumentProcessingConfigCard from '../../Components/DocumentProcessingConfigCard.vue';
+import DocumentReviewCard from '../../Components/DocumentReviewCard.vue';
 import PageHeader from '../../Components/PageHeader.vue';
+import PdfPreviewCard from '../../Components/PdfPreviewCard.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
 
@@ -39,6 +41,7 @@ const form = useForm({
 });
 
 const processForm = useForm({});
+const pdfForm = useForm({});
 
 const submit = () => {
     form.put(`/exam-documents/${props.document.id}`, {
@@ -48,6 +51,12 @@ const submit = () => {
 
 const runStandardization = () => {
     processForm.post(`/exam-documents/${props.document.id}/process`, {
+        preserveScroll: true,
+    });
+};
+
+const retryPdfExport = () => {
+    pdfForm.post(`/exam-documents/${props.document.id}/export-pdf`, {
         preserveScroll: true,
     });
 };
@@ -64,17 +73,6 @@ const runStatusClass = (status) => {
             return 'bg-sky-50 text-sky-800 border-sky-200';
     }
 };
-
-const warningBadgeClass = (severity) => {
-    switch (severity) {
-        case 'REVIEW_REQUIRED':
-            return 'bg-rose-50 text-rose-800 border-rose-200';
-        case 'WARNING':
-            return 'bg-amber-50 text-amber-800 border-amber-200';
-        default:
-            return 'bg-slate-100 text-slate-700 border-slate-200';
-    }
-};
 </script>
 
 <template>
@@ -87,6 +85,13 @@ const warningBadgeClass = (severity) => {
         >
             <template #actions>
                 <StatusBadge :status="document.current_status" :label="document.status_label" />
+                <a
+                    v-if="document.output_pdf_file"
+                    :href="document.output_pdf_file.download_url"
+                    class="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 transition"
+                >
+                    Unduh Hasil PDF
+                </a>
                 <a
                     v-if="document.output_docx_file"
                     :href="document.output_docx_file.download_url"
@@ -132,13 +137,13 @@ const warningBadgeClass = (severity) => {
                     :can-configure="document.can_edit"
                 />
 
-                <!-- Panel Eksekusi & Hasil Standarisasi DOCX -->
+                <!-- Panel Eksekusi & Hasil Standarisasi DOCX & PDF -->
                 <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                            <h2 class="text-base font-bold text-slate-900">Standarisasi Dokumen DOCX</h2>
+                            <h2 class="text-base font-bold text-slate-900">Standarisasi Dokumen DOCX & Ekspor PDF</h2>
                             <p class="mt-0.5 text-xs text-slate-500">
-                                Menstandarisasi ukuran kertas F4 (215 × 330 mm), margin, tipografi Times New Roman 12 pt, dan kop halaman pertama tanpa mengubah isi soal maupun file asli.
+                                Menstandarisasi ukuran kertas F4 (215 × 330 mm), margin, tipografi Times New Roman 12 pt, kop halaman pertama, serta mengekspor PDF siap cetak via LibreOffice.
                             </p>
                         </div>
 
@@ -149,8 +154,8 @@ const warningBadgeClass = (severity) => {
                             @click="runStandardization"
                             class="rounded-lg bg-blue-800 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50 transition"
                         >
-                            <span v-if="processForm.processing">Memproses DOCX...</span>
-                            <span v-else>{{ document.output_docx_file ? 'Proses Ulang Standarisasi DOCX' : 'Proses Standarisasi DOCX' }}</span>
+                            <span v-if="processForm.processing">Memproses DOCX & PDF...</span>
+                            <span v-else>{{ document.output_docx_file ? 'Proses Ulang Standarisasi' : 'Proses Standarisasi DOCX & PDF' }}</span>
                         </button>
                     </div>
 
@@ -160,12 +165,24 @@ const warningBadgeClass = (severity) => {
                         class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3"
                     >
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div class="flex items-center gap-2">
+                            <div class="flex flex-wrap items-center gap-2">
                                 <span
                                     class="rounded-md border px-2.5 py-0.5 text-xs font-semibold"
                                     :class="runStatusClass(document.latest_run.status)"
                                 >
                                     {{ document.latest_run.status_label }}
+                                </span>
+                                <span
+                                    v-if="document.latest_run.pdf_status === 'COMPLETED'"
+                                    class="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-800"
+                                >
+                                    PDF Siap
+                                </span>
+                                <span
+                                    v-else-if="document.latest_run.pdf_status === 'FAILED'"
+                                    class="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-800"
+                                >
+                                    Ekspor PDF Gagal
                                 </span>
                                 <span
                                     v-if="document.latest_run.needs_manual_review"
@@ -188,6 +205,14 @@ const warningBadgeClass = (severity) => {
                         >
                             <p class="font-semibold">Pesan Kesalahan:</p>
                             <p class="mt-0.5">{{ document.latest_run.error_message }}</p>
+                        </div>
+
+                        <div
+                            v-if="document.latest_run.pdf_error_message && document.latest_run.error_message !== document.latest_run.pdf_error_message"
+                            class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
+                        >
+                            <p class="font-semibold">Catatan Ekspor PDF:</p>
+                            <p class="mt-0.5">{{ document.latest_run.pdf_error_message }}</p>
                         </div>
 
                         <div
@@ -220,32 +245,14 @@ const warningBadgeClass = (severity) => {
                             </div>
                         </div>
 
-                        <p v-if="document.latest_run.engine_name" class="text-[11px] text-slate-500">
-                            Mesin: {{ document.latest_run.engine_name }} v{{ document.latest_run.engine_version }}
-                            (Python {{ document.latest_run.python_version }}, python-docx {{ document.latest_run.docx_library_version }})
-                        </p>
-
-                        <!-- Peringatan Terdeteksi -->
-                        <div v-if="document.latest_run.warnings && document.latest_run.warnings.length > 0" class="space-y-2 pt-1">
-                            <p class="text-xs font-semibold text-slate-800">
-                                Catatan & Peringatan Struktur ({{ document.latest_run.warnings.length }}):
+                        <div class="space-y-0.5 text-[11px] text-slate-500">
+                            <p v-if="document.latest_run.engine_name">
+                                Mesin DOCX: {{ document.latest_run.engine_name }} v{{ document.latest_run.engine_version }}
+                                (Python {{ document.latest_run.python_version }}, python-docx {{ document.latest_run.docx_library_version }})
                             </p>
-                            <div
-                                v-for="warn in document.latest_run.warnings"
-                                :key="warn.id"
-                                class="rounded-lg border bg-white p-3 text-xs space-y-1"
-                            >
-                                <div class="flex flex-wrap items-center justify-between gap-2">
-                                    <span class="font-mono font-semibold text-slate-800">{{ warn.code }}</span>
-                                    <span
-                                        class="rounded border px-2 py-0.5 text-[11px] font-semibold"
-                                        :class="warningBadgeClass(warn.severity)"
-                                    >
-                                        {{ warn.severity_label }}
-                                    </span>
-                                </div>
-                                <p class="text-slate-700">{{ warn.message }}</p>
-                            </div>
+                            <p v-if="document.latest_run.libreoffice_version">
+                                Konverter PDF: {{ document.latest_run.libreoffice_version }}
+                            </p>
                         </div>
                     </div>
 
@@ -253,9 +260,18 @@ const warningBadgeClass = (severity) => {
                         v-else
                         class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600"
                     >
-                        Dokumen ini belum pernah diproses. Klik <strong>Proses Standarisasi DOCX</strong> untuk menghasilkan versi terstandarisasi F4.
+                        Dokumen ini belum pernah diproses. Klik <strong>Proses Standarisasi DOCX & PDF</strong> untuk menghasilkan versi terstandarisasi F4.
                     </div>
                 </div>
+
+                <!-- Pratinjau PDF Inline Terotorisasi -->
+                <PdfPreviewCard
+                    :pdf-file="document.output_pdf_file"
+                    :current-status="document.current_status"
+                />
+
+                <!-- Pemeriksaan Peringatan & Keputusan Persetujuan / Revisi -->
+                <DocumentReviewCard :document="document" />
 
                 <!-- Form Edit Metadata -->
                 <form
@@ -361,6 +377,80 @@ const warningBadgeClass = (severity) => {
 
             <!-- Kolom Samping Kanan: Arsip File & Riwayat -->
             <div class="space-y-6">
+                <!-- Kartu Hasil Cetak PDF -->
+                <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+                    <div class="flex items-center justify-between gap-2">
+                        <h2 class="text-base font-bold text-slate-900">Hasil Cetak PDF</h2>
+                        <span
+                            v-if="document.output_pdf_file"
+                            class="rounded bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] font-semibold text-rose-800"
+                        >
+                            PDF F4 Siap
+                        </span>
+                        <span
+                            v-else-if="document.current_status === 'PDF_FAILED'"
+                            class="rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                        >
+                            Ekspor Gagal
+                        </span>
+                    </div>
+
+                    <div v-if="document.output_pdf_file" class="space-y-3 border-t border-slate-100 pt-4 text-sm">
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Nama File PDF</dt>
+                            <dd class="mt-0.5 font-semibold text-slate-900 break-all">
+                                {{ document.output_pdf_file.original_filename }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Ukuran & Waktu Selesai</dt>
+                            <dd class="mt-0.5 text-slate-800">
+                                {{ document.output_pdf_file.human_size }} • {{ document.output_pdf_file.created_at }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Checksum SHA-256 PDF</dt>
+                            <dd class="mt-0.5 font-mono text-[11px] text-slate-600 break-all bg-slate-50 p-2 rounded border border-slate-200">
+                                {{ document.output_pdf_file.checksum_sha256 }}
+                            </dd>
+                        </div>
+                        <a
+                            :href="document.output_pdf_file.download_url"
+                            class="block w-full text-center rounded-lg bg-rose-700 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-800 transition"
+                        >
+                            Unduh Hasil PDF (.pdf)
+                        </a>
+                        <button
+                            v-if="document.can_export_pdf"
+                            type="button"
+                            :disabled="pdfForm.processing"
+                            @click="retryPdfExport"
+                            class="block w-full text-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition"
+                        >
+                            <span v-if="pdfForm.processing">Mengekspor Ulang PDF...</span>
+                            <span v-else>Buat Ulang Versi PDF</span>
+                        </button>
+                    </div>
+
+                    <div v-else class="space-y-3">
+                        <p class="text-xs text-slate-500">
+                            {{ document.current_status === 'PDF_FAILED'
+                                ? 'Konversi PDF gagal pada proses sebelumnya, namun hasil DOCX tetap aman. Anda dapat mengekspor ulang PDF tanpa memproses ulang DOCX.'
+                                : 'Belum ada berkas PDF F4. Jalankan standarisasi dokumen untuk menghasilkan versi DOCX dan PDF.' }}
+                        </p>
+                        <button
+                            v-if="document.can_export_pdf"
+                            type="button"
+                            :disabled="pdfForm.processing"
+                            @click="retryPdfExport"
+                            class="block w-full text-center rounded-lg bg-blue-800 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-900 disabled:opacity-50 transition"
+                        >
+                            <span v-if="pdfForm.processing">Mengekspor PDF...</span>
+                            <span v-else>Ekspor PDF dari Hasil DOCX</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Kartu Hasil Standarisasi DOCX -->
                 <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
                     <div class="flex items-center justify-between gap-2">
@@ -450,18 +540,29 @@ const warningBadgeClass = (severity) => {
                             class="py-2.5 first:pt-0 last:pb-0 text-xs space-y-1"
                         >
                             <div class="flex items-center justify-between gap-2">
-                                <span class="font-semibold text-slate-800">#{{ run.id }} • {{ run.status_label }}</span>
+                                <span class="font-semibold text-slate-800">
+                                    #{{ run.id }} ({{ run.target_type }}) • {{ run.status_label }}
+                                </span>
                                 <span class="text-slate-500">{{ run.created_at }}</span>
                             </div>
-                            <div class="flex items-center justify-between text-[11px] text-slate-500">
+                            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
                                 <span>Oleh: {{ run.triggered_by_name }}</span>
-                                <a
-                                    v-if="run.output_docx_url"
-                                    :href="run.output_docx_url"
-                                    class="font-semibold text-blue-700 hover:underline"
-                                >
-                                    Unduh Versi Ini
-                                </a>
+                                <div class="flex items-center gap-2">
+                                    <a
+                                        v-if="run.output_docx_url"
+                                        :href="run.output_docx_url"
+                                        class="font-semibold text-emerald-700 hover:underline"
+                                    >
+                                        DOCX
+                                    </a>
+                                    <a
+                                        v-if="run.output_pdf_url"
+                                        :href="run.output_pdf_url"
+                                        class="font-semibold text-rose-700 hover:underline"
+                                    >
+                                        PDF
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </div>
