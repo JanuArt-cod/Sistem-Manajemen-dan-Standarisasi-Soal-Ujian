@@ -30,3 +30,6 @@ Thumbs.db
 /tools/document_engine/fixtures/*.pdf
 
 /engine/.venv/
+
+/fixtures_local/*
+!/fixtures_local/.gitkeep
