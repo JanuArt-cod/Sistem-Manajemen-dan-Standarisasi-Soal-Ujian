@@ -65,7 +65,9 @@ class FormattingSnapshotBuilder
                 'template_checksum' => $template->template_checksum,
             ],
             'school' => [
-                'name' => $schoolProfile?->getAttribute('school_name') ?? $schoolProfile?->getAttribute('name'),
+                'name' => $schoolProfile?->getAttribute('institution_name')
+                    ?? $schoolProfile?->getAttribute('school_name')
+                    ?? $schoolProfile?->getAttribute('name'),
                 'foundation_name' => $schoolProfile?->getAttribute('foundation_name'),
                 'npsn' => $schoolProfile?->getAttribute('npsn'),
                 'address' => $schoolProfile?->getAttribute('address'),
@@ -89,8 +91,8 @@ class FormattingSnapshotBuilder
                 'school_class_id' => $examDocument->school_class_id,
                 'class_name' => $examDocument->schoolClass?->getAttribute('name'),
                 'teacher_name' => $examDocument->getAttribute('teacher_name'),
-                'title' => $examDocument->getAttribute('title')
-                    ?? $examDocument->getAttribute('document_title')
+                'title' => $examDocument->getAttribute('document_title')
+                    ?? $examDocument->getAttribute('title')
                     ?? "Dokumen Soal #{$examDocument->id}",
                 'exam_date' => $examDocument->getAttribute('exam_date'),
                 'duration_minutes' => $examDocument->getAttribute('duration_minutes'),

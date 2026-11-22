@@ -1,0 +1,1 @@
+"""Unit & CLI tests for SIMSOAL DOCX engine."""

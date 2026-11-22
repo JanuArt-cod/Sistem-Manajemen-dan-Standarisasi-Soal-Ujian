@@ -83,6 +83,14 @@ class ExamDocument extends Model
             ->latest('id');
     }
 
+    public function outputDocxFile(): HasOne
+    {
+        return $this->hasOne(DocumentFile::class)
+            ->where('file_role', DocumentFileRole::OUTPUT_DOCX)
+            ->where('is_current', true)
+            ->latest('id');
+    }
+
     public function processingConfigs(): HasMany
     {
         return $this->hasMany(DocumentProcessingConfig::class);
@@ -90,8 +98,21 @@ class ExamDocument extends Model
 
     public function processingConfig(): HasOne
     {
-        return $this->hasOne(DocumentProcessingConfig::class)
-            ->where('is_current', true)
-            ->latest('id');
+        return $this->hasOne(DocumentProcessingConfig::class)->latest('id');
+    }
+
+    public function processingRuns(): HasMany
+    {
+        return $this->hasMany(DocumentProcessingRun::class)->orderByDesc('id');
+    }
+
+    public function latestProcessingRun(): HasOne
+    {
+        return $this->hasOne(DocumentProcessingRun::class)->latestOfMany();
+    }
+
+    public function warnings(): HasMany
+    {
+        return $this->hasMany(DocumentWarning::class)->orderBy('id');
     }
 }

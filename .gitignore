@@ -28,3 +28,5 @@ Thumbs.db
 /tools/document_engine/fixtures/*.docx
 /tools/document_engine/fixtures/*.doc
 /tools/document_engine/fixtures/*.pdf
+
+/engine/.venv/

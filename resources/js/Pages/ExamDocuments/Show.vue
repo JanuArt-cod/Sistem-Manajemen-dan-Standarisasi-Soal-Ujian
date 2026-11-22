@@ -1,5 +1,6 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import DocumentProcessingConfigCard from '../../Components/DocumentProcessingConfigCard.vue';
 import PageHeader from '../../Components/PageHeader.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -17,6 +18,14 @@ const props = defineProps({
         type: Array,
         required: true,
     },
+    presets: {
+        type: Array,
+        required: true,
+    },
+    templates: {
+        type: Array,
+        required: true,
+    },
 });
 
 const form = useForm({
@@ -29,10 +38,42 @@ const form = useForm({
     notes: props.document.notes || '',
 });
 
+const processForm = useForm({});
+
 const submit = () => {
     form.put(`/exam-documents/${props.document.id}`, {
         preserveScroll: true,
     });
+};
+
+const runStandardization = () => {
+    processForm.post(`/exam-documents/${props.document.id}/process`, {
+        preserveScroll: true,
+    });
+};
+
+const runStatusClass = (status) => {
+    switch (status) {
+        case 'COMPLETED':
+            return 'bg-emerald-50 text-emerald-800 border-emerald-200';
+        case 'COMPLETED_WITH_WARNINGS':
+            return 'bg-amber-50 text-amber-800 border-amber-200';
+        case 'FAILED':
+            return 'bg-rose-50 text-rose-800 border-rose-200';
+        default:
+            return 'bg-sky-50 text-sky-800 border-sky-200';
+    }
+};
+
+const warningBadgeClass = (severity) => {
+    switch (severity) {
+        case 'REVIEW_REQUIRED':
+            return 'bg-rose-50 text-rose-800 border-rose-200';
+        case 'WARNING':
+            return 'bg-amber-50 text-amber-800 border-amber-200';
+        default:
+            return 'bg-slate-100 text-slate-700 border-slate-200';
+    }
 };
 </script>
 
@@ -47,9 +88,16 @@ const submit = () => {
             <template #actions>
                 <StatusBadge :status="document.current_status" :label="document.status_label" />
                 <a
+                    v-if="document.output_docx_file"
+                    :href="document.output_docx_file.download_url"
+                    class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 transition"
+                >
+                    Unduh Hasil DOCX
+                </a>
+                <a
                     v-if="document.source_file"
                     :href="document.source_file.download_url"
-                    class="rounded-lg bg-blue-800 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900 transition"
+                    class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition"
                 >
                     Unduh Sumber Asli
                 </a>
@@ -73,140 +121,351 @@ const submit = () => {
         </div>
 
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <!-- Form Edit Metadata -->
-            <form
-                @submit.prevent="submit"
-                class="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4"
-            >
-                <h2 class="text-base font-bold text-slate-900">Metadata Naskah Soal</h2>
+            <!-- Kolom Utama Kiri (2 Kolom) -->
+            <div class="lg:col-span-2 space-y-6">
+                <!-- Konfigurasi Snapshot Preset & Kop Halaman Pertama -->
+                <DocumentProcessingConfigCard
+                    :exam-document-id="document.id"
+                    :current-config="document.processing_config"
+                    :presets="presets"
+                    :templates="templates"
+                    :can-configure="document.can_edit"
+                />
 
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">Judul Naskah Soal</label>
-                    <input
-                        v-model="form.document_title"
-                        type="text"
-                        required
-                        :disabled="!document.can_edit"
-                        class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
-                    />
-                    <p v-if="form.errors.document_title" class="mt-1 text-xs text-rose-600">{{ form.errors.document_title }}</p>
+                <!-- Panel Eksekusi & Hasil Standarisasi DOCX -->
+                <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <h2 class="text-base font-bold text-slate-900">Standarisasi Dokumen DOCX</h2>
+                            <p class="mt-0.5 text-xs text-slate-500">
+                                Menstandarisasi ukuran kertas F4 (215 × 330 mm), margin, tipografi Times New Roman 12 pt, dan kop halaman pertama tanpa mengubah isi soal maupun file asli.
+                            </p>
+                        </div>
+
+                        <button
+                            v-if="document.can_process"
+                            type="button"
+                            :disabled="processForm.processing"
+                            @click="runStandardization"
+                            class="rounded-lg bg-blue-800 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50 transition"
+                        >
+                            <span v-if="processForm.processing">Memproses DOCX...</span>
+                            <span v-else>{{ document.output_docx_file ? 'Proses Ulang Standarisasi DOCX' : 'Proses Standarisasi DOCX' }}</span>
+                        </button>
+                    </div>
+
+                    <!-- Status & Statistik Proses Terakhir -->
+                    <div
+                        v-if="document.latest_run"
+                        class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3"
+                    >
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="rounded-md border px-2.5 py-0.5 text-xs font-semibold"
+                                    :class="runStatusClass(document.latest_run.status)"
+                                >
+                                    {{ document.latest_run.status_label }}
+                                </span>
+                                <span
+                                    v-if="document.latest_run.needs_manual_review"
+                                    class="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-800"
+                                >
+                                    Perlu Tinjauan Manual
+                                </span>
+                            </div>
+                            <span class="text-xs text-slate-500">
+                                {{ document.latest_run.finished_at || document.latest_run.created_at }}
+                                <template v-if="document.latest_run.duration_ms !== null">
+                                    • {{ document.latest_run.duration_ms }} ms
+                                </template>
+                            </span>
+                        </div>
+
+                        <div
+                            v-if="document.latest_run.error_message"
+                            class="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800"
+                        >
+                            <p class="font-semibold">Pesan Kesalahan:</p>
+                            <p class="mt-0.5">{{ document.latest_run.error_message }}</p>
+                        </div>
+
+                        <div
+                            v-if="document.latest_run.metrics && Object.keys(document.latest_run.metrics).length > 0"
+                            class="grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs"
+                        >
+                            <div class="rounded-md border border-slate-200 bg-white p-2.5">
+                                <span class="text-slate-500 block">Paragraf Naskah</span>
+                                <span class="font-bold text-slate-900">
+                                    {{ document.latest_run.metrics.input_non_empty_paragraph_count ?? 0 }}
+                                </span>
+                            </div>
+                            <div class="rounded-md border border-slate-200 bg-white p-2.5">
+                                <span class="text-slate-500 block">Tabel Soal</span>
+                                <span class="font-bold text-slate-900">
+                                    {{ document.latest_run.metrics.input_table_count ?? 0 }}
+                                </span>
+                            </div>
+                            <div class="rounded-md border border-slate-200 bg-white p-2.5">
+                                <span class="text-slate-500 block">Gambar Inline</span>
+                                <span class="font-bold text-slate-900">
+                                    {{ document.latest_run.metrics.input_image_count ?? 0 }}
+                                </span>
+                            </div>
+                            <div class="rounded-md border border-slate-200 bg-white p-2.5">
+                                <span class="text-slate-500 block">Rumus OMML</span>
+                                <span class="font-bold text-slate-900">
+                                    {{ document.latest_run.metrics.input_equation_count ?? 0 }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <p v-if="document.latest_run.engine_name" class="text-[11px] text-slate-500">
+                            Mesin: {{ document.latest_run.engine_name }} v{{ document.latest_run.engine_version }}
+                            (Python {{ document.latest_run.python_version }}, python-docx {{ document.latest_run.docx_library_version }})
+                        </p>
+
+                        <!-- Peringatan Terdeteksi -->
+                        <div v-if="document.latest_run.warnings && document.latest_run.warnings.length > 0" class="space-y-2 pt-1">
+                            <p class="text-xs font-semibold text-slate-800">
+                                Catatan & Peringatan Struktur ({{ document.latest_run.warnings.length }}):
+                            </p>
+                            <div
+                                v-for="warn in document.latest_run.warnings"
+                                :key="warn.id"
+                                class="rounded-lg border bg-white p-3 text-xs space-y-1"
+                            >
+                                <div class="flex flex-wrap items-center justify-between gap-2">
+                                    <span class="font-mono font-semibold text-slate-800">{{ warn.code }}</span>
+                                    <span
+                                        class="rounded border px-2 py-0.5 text-[11px] font-semibold"
+                                        :class="warningBadgeClass(warn.severity)"
+                                    >
+                                        {{ warn.severity_label }}
+                                    </span>
+                                </div>
+                                <p class="text-slate-700">{{ warn.message }}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        v-else
+                        class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600"
+                    >
+                        Dokumen ini belum pernah diproses. Klik <strong>Proses Standarisasi DOCX</strong> untuk menghasilkan versi terstandarisasi F4.
+                    </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <!-- Form Edit Metadata -->
+                <form
+                    @submit.prevent="submit"
+                    class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4"
+                >
+                    <h2 class="text-base font-bold text-slate-900">Metadata Naskah Soal</h2>
+
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Nama Guru Penyusun</label>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Judul Naskah Soal</label>
                         <input
-                            v-model="form.teacher_name"
+                            v-model="form.document_title"
                             type="text"
                             required
                             :disabled="!document.can_edit"
                             class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
                         />
-                        <p v-if="form.errors.teacher_name" class="mt-1 text-xs text-rose-600">{{ form.errors.teacher_name }}</p>
+                        <p v-if="form.errors.document_title" class="mt-1 text-xs text-rose-600">{{ form.errors.document_title }}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Nama Guru Penyusun</label>
+                            <input
+                                v-model="form.teacher_name"
+                                type="text"
+                                required
+                                :disabled="!document.can_edit"
+                                class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
+                            />
+                            <p v-if="form.errors.teacher_name" class="mt-1 text-xs text-rose-600">{{ form.errors.teacher_name }}</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Mata Pelajaran</label>
+                            <select
+                                v-model="form.subject_id"
+                                :disabled="!document.can_edit"
+                                class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
+                            >
+                                <option value="">Belum ditentukan</option>
+                                <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Rombongan Kelas</label>
+                            <select
+                                v-model="form.school_class_id"
+                                :disabled="!document.can_edit"
+                                class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
+                            >
+                                <option value="">Belum ditentukan</option>
+                                <option v-for="c in schoolClasses" :key="c.id" :value="c.id">{{ c.name }}</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Tanggal Ujian</label>
+                            <input
+                                v-model="form.exam_date"
+                                type="date"
+                                :disabled="!document.can_edit"
+                                class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
+                            />
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Durasi Ujian (Menit)</label>
+                            <input
+                                v-model="form.duration_minutes"
+                                type="number"
+                                min="1"
+                                max="600"
+                                :disabled="!document.can_edit"
+                                class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
+                            />
+                        </div>
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Mata Pelajaran</label>
-                        <select
-                            v-model="form.subject_id"
-                            :disabled="!document.can_edit"
-                            class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
-                        >
-                            <option value="">Belum ditentukan</option>
-                            <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Rombongan Kelas</label>
-                        <select
-                            v-model="form.school_class_id"
-                            :disabled="!document.can_edit"
-                            class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
-                        >
-                            <option value="">Belum ditentukan</option>
-                            <option v-for="c in schoolClasses" :key="c.id" :value="c.id">{{ c.name }}</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Tanggal Ujian</label>
-                        <input
-                            v-model="form.exam_date"
-                            type="date"
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Catatan Operator</label>
+                        <textarea
+                            v-model="form.notes"
+                            rows="3"
                             :disabled="!document.can_edit"
                             class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
                         />
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Durasi Ujian (Menit)</label>
-                        <input
-                            v-model="form.duration_minutes"
-                            type="number"
-                            min="1"
-                            max="600"
-                            :disabled="!document.can_edit"
-                            class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
-                        />
+                    <div v-if="document.can_edit" class="border-t border-slate-100 pt-4 flex justify-end">
+                        <button
+                            type="submit"
+                            :disabled="form.processing"
+                            class="rounded-lg bg-blue-800 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
+                        >
+                            <span v-if="form.processing">Menyimpan...</span>
+                            <span v-else>Simpan Perubahan Metadata</span>
+                        </button>
                     </div>
+                </form>
+            </div>
+
+            <!-- Kolom Samping Kanan: Arsip File & Riwayat -->
+            <div class="space-y-6">
+                <!-- Kartu Hasil Standarisasi DOCX -->
+                <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+                    <div class="flex items-center justify-between gap-2">
+                        <h2 class="text-base font-bold text-slate-900">Hasil Standarisasi DOCX</h2>
+                        <span
+                            v-if="document.output_docx_file"
+                            class="rounded bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                        >
+                            Tersedia
+                        </span>
+                    </div>
+
+                    <div v-if="document.output_docx_file" class="space-y-3 border-t border-slate-100 pt-4 text-sm">
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Nama File Output</dt>
+                            <dd class="mt-0.5 font-semibold text-slate-900 break-all">
+                                {{ document.output_docx_file.original_filename }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Ukuran & Waktu Selesai</dt>
+                            <dd class="mt-0.5 text-slate-800">
+                                {{ document.output_docx_file.human_size }} • {{ document.output_docx_file.created_at }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Checksum SHA-256 Output</dt>
+                            <dd class="mt-0.5 font-mono text-[11px] text-slate-600 break-all bg-slate-50 p-2 rounded border border-slate-200">
+                                {{ document.output_docx_file.checksum_sha256 }}
+                            </dd>
+                        </div>
+                        <a
+                            :href="document.output_docx_file.download_url"
+                            class="block w-full text-center rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-800 transition"
+                        >
+                            Unduh Hasil DOCX (.docx)
+                        </a>
+                    </div>
+
+                    <p v-else class="text-xs text-slate-500">
+                        Belum ada file keluaran .docx. Jalankan proses standarisasi untuk membuat file output baru.
+                    </p>
                 </div>
 
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1">Catatan Operator</label>
-                    <textarea
-                        v-model="form.notes"
-                        rows="3"
-                        :disabled="!document.can_edit"
-                        class="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm disabled:bg-slate-100"
-                    />
+                <!-- Informasi File Sumber Privat -->
+                <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
+                    <h2 class="text-base font-bold text-slate-900">Arsip Sumber Asli</h2>
+                    <p class="text-xs text-slate-500">
+                        Disimpan pada penyimpanan privat (immutable) dan tidak akan pernah ditimpa saat standarisasi dijalankan.
+                    </p>
+
+                    <dl v-if="document.source_file" class="space-y-3 border-t border-slate-100 pt-4 text-sm">
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Nama File Asli</dt>
+                            <dd class="mt-0.5 font-semibold text-slate-900 break-all">
+                                {{ document.source_file.original_filename }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Ukuran & Format</dt>
+                            <dd class="mt-0.5 text-slate-800">
+                                {{ document.source_file.human_size }} ({{ document.source_format }})
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Diunggah Oleh</dt>
+                            <dd class="mt-0.5 text-slate-800">
+                                {{ document.uploader_name }} • {{ document.created_at }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt class="text-xs font-medium text-slate-500">Checksum SHA-256 Asli</dt>
+                            <dd class="mt-0.5 font-mono text-[11px] text-slate-600 break-all bg-slate-50 p-2 rounded border border-slate-200">
+                                {{ document.source_file.checksum_sha256 }}
+                            </dd>
+                        </div>
+                    </dl>
                 </div>
 
-                <div v-if="document.can_edit" class="border-t border-slate-100 pt-4 flex justify-end">
-                    <button
-                        type="submit"
-                        :disabled="form.processing"
-                        class="rounded-lg bg-blue-800 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-900 disabled:opacity-50"
-                    >
-                        <span v-if="form.processing">Menyimpan...</span>
-                        <span v-else>Simpan Perubahan Metadata</span>
-                    </button>
+                <!-- Riwayat Eksekusi Proses -->
+                <div v-if="document.processing_runs.length > 0" class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs space-y-3">
+                    <h2 class="text-base font-bold text-slate-900">Riwayat Eksekusi</h2>
+                    <div class="divide-y divide-slate-100">
+                        <div
+                            v-for="run in document.processing_runs"
+                            :key="run.id"
+                            class="py-2.5 first:pt-0 last:pb-0 text-xs space-y-1"
+                        >
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="font-semibold text-slate-800">#{{ run.id }} • {{ run.status_label }}</span>
+                                <span class="text-slate-500">{{ run.created_at }}</span>
+                            </div>
+                            <div class="flex items-center justify-between text-[11px] text-slate-500">
+                                <span>Oleh: {{ run.triggered_by_name }}</span>
+                                <a
+                                    v-if="run.output_docx_url"
+                                    :href="run.output_docx_url"
+                                    class="font-semibold text-blue-700 hover:underline"
+                                >
+                                    Unduh Versi Ini
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </form>
-
-            <!-- Informasi File Sumber Privat -->
-            <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-xs h-fit space-y-4">
-                <h2 class="text-base font-bold text-slate-900">Arsip Sumber Asli</h2>
-                <p class="text-xs text-slate-500">
-                    Disimpan pada penyimpanan privat (immutable) dan tidak akan pernah ditimpa saat standarisasi dijalankan.
-                </p>
-
-                <dl v-if="document.source_file" class="space-y-3 border-t border-slate-100 pt-4 text-sm">
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500">Nama File Asli</dt>
-                        <dd class="mt-0.5 font-semibold text-slate-900 break-all">
-                            {{ document.source_file.original_filename }}
-                        </dd>
-                    </div>
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500">Ukuran & Format</dt>
-                        <dd class="mt-0.5 text-slate-800">
-                            {{ document.source_file.human_size }} ({{ document.source_format }})
-                        </dd>
-                    </div>
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500">Diunggah Oleh</dt>
-                        <dd class="mt-0.5 text-slate-800">
-                            {{ document.uploader_name }} • {{ document.created_at }}
-                        </dd>
-                    </div>
-                    <div>
-                        <dt class="text-xs font-medium text-slate-500">Checksum SHA-256</dt>
-                        <dd class="mt-0.5 font-mono text-[11px] text-slate-600 break-all bg-slate-50 p-2 rounded border border-slate-200">
-                            {{ document.source_file.checksum_sha256 }}
-                        </dd>
-                    </div>
-                </dl>
             </div>
         </div>
     </AppLayout>

@@ -40,6 +40,11 @@ class DocumentFile extends Model
         return $this->belongsTo(ExamDocument::class);
     }
 
+    public function processingRun(): BelongsTo
+    {
+        return $this->belongsTo(DocumentProcessingRun::class, 'processing_run_id');
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');

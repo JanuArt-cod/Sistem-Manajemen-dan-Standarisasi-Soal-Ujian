@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentFileController;
 use App\Http\Controllers\DocumentProcessingConfigController;
+use App\Http\Controllers\DocumentProcessingController;
 use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\ExamDocumentController;
 use App\Http\Controllers\ExamPeriodController;
@@ -36,7 +37,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::patch('/exam-periods/{examPeriod}/archive', [ExamPeriodController::class, 'archive'])->name('exam-periods.archive');
     Route::patch('/exam-periods/{examPeriod}/reopen', [ExamPeriodController::class, 'reopen'])->name('exam-periods.reopen');
 
-    // Dokumen Soal, Konfigurasi Snapshot & Unduhan File Privat (Admin & Operator)
+    // Dokumen Soal, Konfigurasi Snapshot, Proses Standarisasi & Unduhan File Privat (Admin & Operator)
     Route::get('/exam-documents', [ExamDocumentController::class, 'index'])->name('exam-documents.index');
     Route::get('/exam-documents/create', [ExamDocumentController::class, 'create'])->name('exam-documents.create');
     Route::post('/exam-documents', [ExamDocumentController::class, 'store'])->name('exam-documents.store');
@@ -44,6 +45,8 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::put('/exam-documents/{examDocument}', [ExamDocumentController::class, 'update'])->name('exam-documents.update');
     Route::put('/exam-documents/{examDocument}/processing-config', [DocumentProcessingConfigController::class, 'update'])
         ->name('exam-documents.processing-config.update');
+    Route::post('/exam-documents/{examDocument}/process', [DocumentProcessingController::class, 'store'])
+        ->name('exam-documents.process');
     Route::get('/document-files/{documentFile}/download', [DocumentFileController::class, 'download'])->name('document-files.download');
 
     // Preset Format & Template Kop (Dapat dilihat Admin & Operator; dikelola Admin)

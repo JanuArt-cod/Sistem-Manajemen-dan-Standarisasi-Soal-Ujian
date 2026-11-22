@@ -8,7 +8,9 @@ use App\Enums\ExamPeriodStatus;
 use App\Http\Requests\ExamDocuments\StoreExamDocumentRequest;
 use App\Http\Requests\ExamDocuments\UpdateExamDocumentRequest;
 use App\Models\DocumentFile;
+use App\Models\DocumentProcessingRun;
 use App\Models\DocumentTemplate;
+use App\Models\DocumentWarning;
 use App\Models\ExamDocument;
 use App\Models\ExamPeriod;
 use App\Models\FormattingPreset;
@@ -40,6 +42,7 @@ class ExamDocumentController extends Controller
                 'schoolClass:id,name',
                 'uploader:id,name',
                 'sourceFile',
+                'outputDocxFile',
             ])
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($sub) use ($search) {
@@ -57,6 +60,7 @@ class ExamDocumentController extends Controller
             ->withQueryString()
             ->through(function (ExamDocument $doc) {
                 $source = $doc->sourceFile;
+                $outputDocx = $doc->outputDocxFile;
 
                 return [
                     'id' => $doc->id,
@@ -73,6 +77,12 @@ class ExamDocumentController extends Controller
                         'original_filename' => $source->original_filename,
                         'human_size' => $source->humanSize(),
                         'download_url' => route('document-files.download', $source->id),
+                    ] : null,
+                    'output_docx_file' => $outputDocx ? [
+                        'id' => $outputDocx->id,
+                        'original_filename' => $outputDocx->original_filename,
+                        'human_size' => $outputDocx->humanSize(),
+                        'download_url' => route('document-files.download', $outputDocx->id),
                     ] : null,
                     'created_at' => $doc->created_at?->format('d M Y H:i'),
                 ];
@@ -185,10 +195,17 @@ class ExamDocumentController extends Controller
             'uploader:id,name',
             'approver:id,name',
             'sourceFile',
-            'processingConfig.configuredBy:id,name',
+            'outputDocxFile',
+            'processingConfig.configurator:id,name',
+            'processingRuns' => fn ($q) => $q->with([
+                'triggeredBy:id,name',
+                'warnings',
+                'outputDocxFile',
+            ])->limit(10),
         ]);
 
         $source = $examDocument->sourceFile;
+        $outputDocx = $examDocument->outputDocxFile;
         $duplicateExists = false;
 
         if ($source) {
@@ -201,6 +218,10 @@ class ExamDocumentController extends Controller
         }
 
         $activeConfig = $examDocument->processingConfig;
+        $latestRun = $examDocument->processingRuns->first();
+        $isArchived = $examDocument->examPeriod?->status === ExamPeriodStatus::ARCHIVED;
+        $isBusy = in_array($examDocument->current_status, [DocumentStatus::QUEUED, DocumentStatus::PROCESSING], true);
+        $canEdit = $request->user()->can('update', $examDocument) && ! $isArchived;
 
         return Inertia::render('ExamDocuments/Show', [
             'document' => [
@@ -222,10 +243,12 @@ class ExamDocumentController extends Controller
                     'id' => $examDocument->examPeriod->id,
                     'name' => $examDocument->examPeriod->name,
                     'academic_year' => $examDocument->examPeriod->academic_year,
+                    'status' => $examDocument->examPeriod->status->value,
                 ],
                 'uploader_name' => $examDocument->uploader?->name ?? '-',
                 'created_at' => $examDocument->created_at?->format('d M Y H:i'),
-                'can_edit' => $request->user()->can('update', $examDocument),
+                'can_edit' => $canEdit,
+                'can_process' => $canEdit && $source !== null && ! $isBusy,
                 'duplicate_warning' => $duplicateExists,
                 'source_file' => $source ? [
                     'id' => $source->id,
@@ -235,16 +258,27 @@ class ExamDocumentController extends Controller
                     'checksum_sha256' => $source->checksum_sha256,
                     'download_url' => route('document-files.download', $source->id),
                 ] : null,
+                'output_docx_file' => $outputDocx ? [
+                    'id' => $outputDocx->id,
+                    'original_filename' => $outputDocx->original_filename,
+                    'human_size' => $outputDocx->humanSize(),
+                    'checksum_sha256' => $outputDocx->checksum_sha256,
+                    'created_at' => $outputDocx->created_at?->format('d M Y H:i'),
+                    'download_url' => route('document-files.download', $outputDocx->id),
+                ] : null,
                 'processing_config' => $activeConfig ? [
                     'id' => $activeConfig->id,
                     'formatting_preset_id' => $activeConfig->formatting_preset_id,
                     'document_template_id' => $activeConfig->document_template_id,
-                    'preset_snapshot' => $activeConfig->preset_snapshot,
-                    'template_snapshot' => $activeConfig->template_snapshot,
-                    'overrides' => $activeConfig->overrides,
-                    'configured_by_name' => $activeConfig->configuredBy?->name ?? '-',
-                    'updated_at' => $activeConfig->updated_at?->format('d M Y H:i'),
+                    'snapshot_payload' => $activeConfig->snapshot_payload,
+                    'snapshot_checksum' => $activeConfig->snapshot_checksum,
+                    'configured_by_name' => $activeConfig->configurator?->name ?? '-',
+                    'configured_at' => $activeConfig->configured_at?->format('d M Y H:i'),
                 ] : null,
+                'latest_run' => $latestRun ? $this->serializeRun($latestRun) : null,
+                'processing_runs' => $examDocument->processingRuns->map(
+                    fn (DocumentProcessingRun $r) => $this->serializeRun($r)
+                )->values(),
             ],
             'subjects' => Subject::query()
                 ->where('is_active', true)
@@ -261,7 +295,7 @@ class ExamDocumentController extends Controller
                 ->get([
                     'id',
                     'name',
-                    'paper_size',
+                    'paper_code',
                     'paper_width_mm',
                     'paper_height_mm',
                     'font_family',
@@ -277,10 +311,47 @@ class ExamDocumentController extends Controller
                     'id',
                     'name',
                     'header_mode',
-                    'show_identity_box',
+                    'first_page_only',
+                    'show_school_logo',
+                    'show_exam_identity_table',
                     'is_default',
                 ]),
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function serializeRun(DocumentProcessingRun $run): array
+    {
+        return [
+            'id' => $run->id,
+            'target_type' => $run->target_type,
+            'status' => $run->status->value,
+            'status_label' => $run->status->label(),
+            'engine_name' => $run->engine_name,
+            'engine_version' => $run->engine_version,
+            'python_version' => $run->python_version,
+            'docx_library_version' => $run->docx_library_version,
+            'needs_manual_review' => $run->needs_manual_review,
+            'metrics' => $run->metrics_json,
+            'error_message' => $run->error_message,
+            'duration_ms' => $run->duration_ms,
+            'triggered_by_name' => $run->triggeredBy?->name ?? 'Sistem',
+            'created_at' => $run->created_at?->format('d M Y H:i'),
+            'finished_at' => $run->finished_at?->format('d M Y H:i'),
+            'output_docx_url' => $run->outputDocxFile
+                ? route('document-files.download', $run->outputDocxFile->id)
+                : null,
+            'warnings' => $run->warnings->map(fn (DocumentWarning $w) => [
+                'id' => $w->id,
+                'code' => $w->code,
+                'severity' => $w->severity->value,
+                'severity_label' => $w->severity->label(),
+                'message' => $w->message,
+                'location' => $w->location,
+            ])->values(),
+        ];
     }
 
     public function update(UpdateExamDocumentRequest $request, ExamDocument $examDocument): RedirectResponse
