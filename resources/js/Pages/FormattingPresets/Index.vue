@@ -1,6 +1,7 @@
 <script setup>
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
+import ConfirmDialog from '../../Components/ConfirmDialog.vue';
 import PageHeader from '../../Components/PageHeader.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
 import AppLayout from '../../Layouts/AppLayout.vue';
@@ -26,6 +27,8 @@ const props = defineProps({
 
 const showModal = ref(false);
 const editingPreset = ref(null);
+const showResetDialog = ref(false);
+const resetting = ref(false);
 
 const form = useForm({
     name: '',
@@ -134,6 +137,21 @@ const submit = () => {
 const setDefault = (preset) => {
     router.patch(`/formatting-presets/${preset.id}/default`, {}, { preserveScroll: true });
 };
+
+const confirmResetDefault = () => {
+    resetting.value = true;
+    router.post(
+        '/system-maintenance/reset-defaults',
+        { remove_custom: false },
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                resetting.value = false;
+                showResetDialog.value = false;
+            },
+        }
+    );
+};
 </script>
 
 <template>
@@ -145,6 +163,14 @@ const setDefault = (preset) => {
             description="Standar ukuran kertas (default F4 215 × 330 mm), margin halaman, dan tipografi tanpa mengubah isi soal."
         >
             <template #actions>
+                <button
+                    v-if="canManage"
+                    type="button"
+                    @click="showResetDialog = true"
+                    class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+                >
+                    Reset Standar Default
+                </button>
                 <button
                     v-if="canManage"
                     type="button"
@@ -427,5 +453,16 @@ const setDefault = (preset) => {
                 </form>
             </div>
         </div>
+
+        <ConfirmDialog
+            :show="showResetDialog"
+            title="Pulihkan Pengaturan Default?"
+            message="Preset Format F4 Resmi (215 × 330 mm) dan Template Kop Halaman Pertama akan dikembalikan ke nilai standar baku SIMSOAL dan dijadikan default aktif."
+            confirm-text="Ya, Pulihkan Default"
+            variant="primary"
+            :processing="resetting"
+            @confirm="confirmResetDefault"
+            @close="showResetDialog = false"
+        />
     </AppLayout>
 </template>

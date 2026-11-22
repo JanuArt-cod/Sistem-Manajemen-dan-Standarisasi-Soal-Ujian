@@ -60,6 +60,11 @@ const navigationItems = computed(() => {
                 name: 'Pengguna',
                 href: '/users',
                 active: page.url.startsWith('/users'),
+            },
+            {
+                name: 'Pemeliharaan Sistem',
+                href: '/system-maintenance',
+                active: page.url.startsWith('/system-maintenance'),
             }
         );
     }
@@ -76,10 +81,10 @@ const navigationItems = computed(() => {
     />
 
     <aside
-        class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform lg:static lg:translate-x-0"
+        class="fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-slate-200 bg-white transition-transform lg:static lg:h-screen lg:translate-x-0"
         :class="mobileOpen ? 'translate-x-0' : '-translate-x-full'"
     >
-        <div class="flex h-16 items-center justify-between border-b border-slate-200 px-6">
+        <div class="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-6">
             <div>
                 <span class="text-base font-bold tracking-tight text-blue-900">SIMSOAL</span>
                 <p class="text-[11px] font-medium text-slate-500">Standarisasi Naskah Ujian</p>
@@ -94,7 +99,7 @@ const navigationItems = computed(() => {
             </button>
         </div>
 
-        <nav class="flex-1 space-y-1 px-3 py-4" aria-label="Navigasi Utama">
+        <nav class="flex-1 overflow-y-auto space-y-1 px-3 py-4" aria-label="Navigasi Utama">
             <Link
                 v-for="item in navigationItems"
                 :key="item.href"
@@ -111,7 +116,7 @@ const navigationItems = computed(() => {
             </Link>
         </nav>
 
-        <div class="border-t border-slate-200 p-4">
+        <div class="shrink-0 border-t border-slate-200 p-4">
             <div class="rounded-lg bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
                 <p class="font-semibold text-slate-800">Standar Kertas Aktif</p>
                 <p class="mt-0.5">F4 (215 × 330 mm) • TNR 12 pt</p>

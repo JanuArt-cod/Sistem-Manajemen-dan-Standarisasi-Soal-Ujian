@@ -13,6 +13,7 @@ use App\Http\Controllers\ExamPeriodController;
 use App\Http\Controllers\FormattingPresetController;
 use App\Http\Controllers\MasterDataController;
 use App\Http\Controllers\SchoolProfileController;
+use App\Http\Controllers\SystemMaintenanceController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -45,6 +46,7 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::post('/exam-documents', [ExamDocumentController::class, 'store'])->name('exam-documents.store');
     Route::get('/exam-documents/{examDocument}', [ExamDocumentController::class, 'show'])->name('exam-documents.show');
     Route::put('/exam-documents/{examDocument}', [ExamDocumentController::class, 'update'])->name('exam-documents.update');
+    Route::delete('/exam-documents/{examDocument}', [ExamDocumentController::class, 'destroy'])->name('exam-documents.destroy');
     Route::put('/exam-documents/{examDocument}/processing-config', [DocumentProcessingConfigController::class, 'update'])
         ->name('exam-documents.processing-config.update');
     Route::post('/exam-documents/{examDocument}/process', [DocumentProcessingController::class, 'store'])
@@ -90,5 +92,10 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::post('/users', [UserController::class, 'store'])->name('users.store');
         Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
         Route::patch('/users/{user}/toggle-active', [UserController::class, 'toggleActive'])->name('users.toggle-active');
+
+        Route::get('/system-maintenance', [SystemMaintenanceController::class, 'index'])->name('system-maintenance.index');
+        Route::post('/system-maintenance/reset-defaults', [SystemMaintenanceController::class, 'resetDefaults'])->name('system-maintenance.reset-defaults');
+        Route::post('/system-maintenance/purge-documents', [SystemMaintenanceController::class, 'purgeDocuments'])->name('system-maintenance.purge-documents');
+        Route::post('/system-maintenance/purge-master-data', [SystemMaintenanceController::class, 'purgeMasterData'])->name('system-maintenance.purge-master-data');
     });
 });

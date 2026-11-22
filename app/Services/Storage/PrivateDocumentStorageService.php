@@ -6,6 +6,8 @@ use App\Enums\DocumentFileRole;
 use App\Enums\DocumentSourceFormat;
 use App\Enums\DocumentStatus;
 use App\Models\DocumentFile;
+use App\Models\DocumentProcessingRun;
+use App\Models\DocumentWarning;
 use App\Models\ExamDocument;
 use App\Models\ExamPeriod;
 use App\Models\User;
@@ -35,47 +37,41 @@ class PrivateDocumentStorageService
      *
      * @throws Throwable
      */
-    public function storeBatchSources(ExamPeriod $period, array $items, User $uploader): array
+    public function storeBatchSources(ExamPeriod $period, array $items, User$uploader): array
     {
-        $disk = 'local';
-        $storedPaths = [];
-        $createdDocuments = [];
-        $duplicateCount = 0;
+        $disk = 'local';$storedPaths = [];
+        $createdDocuments = [];$duplicateCount = 0;
 
         try {
             DB::transaction(function () use (
-                $period,
-                $items,
-                $uploader,
-                $disk,
+                $period,$items,
+                $uploader,$disk,
                 &$storedPaths,
                 &$createdDocuments,
                 &$duplicateCount
             ): void {
-                foreach ($items as $item) {
+                foreach ($items as$item) {
                     /** @var UploadedFile $file */
-                    $file = $item['file'];
-                    $validation = $item['validation'];
+                    $file =$item['file'];
+                    $validation =$item['validation'];
 
                     $alreadyExistsInPeriod = DocumentFile::query()
                         ->where('checksum_sha256', $validation['checksum_sha256'])
                         ->where('file_role', DocumentFileRole::SOURCE)
-                        ->whereHas('examDocument', fn ($q) => $q->where('exam_period_id', $period->id))
+                        ->whereHas('examDocument', fn ($q) => $q->where('exam_period_id',$period->id))
                         ->exists();
 
-                    if ($alreadyExistsInPeriod) {
-                        $duplicateCount++;
+                    if ($alreadyExistsInPeriod) {$duplicateCount++;
                     }
 
                     $directory = 'sources/'.now()->format('Y/m');
-                    $safeFilename = Str::uuid().'.docx';
-                    $relativePath = $file->storeAs($directory, $safeFilename, $disk);
+                    $safeFilename = Str::uuid().'.docx';$relativePath = $file->storeAs($directory, $safeFilename,$disk);
 
                     if ($relativePath === false) {
                         throw new \RuntimeException('Gagal menulis file sumber ke penyimpanan privat.');
                     }
 
-                    $storedPaths[] = $relativePath;
+                    $storedPaths[] =$relativePath;
 
                     $originalFilename = basename($file->getClientOriginalName());
                     $defaultTitle = pathinfo($originalFilename, PATHINFO_FILENAME);
@@ -111,11 +107,11 @@ class PrivateDocumentStorageService
                         'created_by' => $uploader->id,
                     ]);
 
-                    $createdDocuments[] = $document;
+                    $createdDocuments[] =$document;
                 }
             });
         } catch (Throwable $e) {
-            foreach ($storedPaths as $path) {
+            foreach ($storedPaths as$path) {
                 Storage::disk($disk)->delete($path);
             }
 
@@ -126,5 +122,57 @@ class PrivateDocumentStorageService
             'documents' => $createdDocuments,
             'duplicate_count' => $duplicateCount,
         ];
+    }
+
+    /**
+     * Hapus satu dokumen soal beserta seluruh riwayat proses dan file fisik terkait di penyimpanan privat.
+     *
+     * @throws Throwable
+     */
+    public function deleteDocumentWithFiles(ExamDocument $examDocument): int
+    {
+        $filesToDelete = DocumentFile::query()
+            ->where('exam_document_id', $examDocument->id)
+            ->get(['storage_disk', 'storage_path'])
+            ->map(fn (DocumentFile $file): array => [
+                'disk' => $file->storage_disk ?: 'local',
+                'path' => $file->storage_path,
+            ])
+            ->filter(fn (array $item): bool => filled($item['path']))
+            ->values()
+            ->all();
+
+        DB::transaction(function () use ($examDocument): void {$runIds = DocumentProcessingRun::query()
+                ->where('exam_document_id', $examDocument->id)
+                ->pluck('id');
+
+            if ($runIds->isNotEmpty()) {
+                DocumentWarning::query()
+                    ->whereIn('document_processing_run_id', $runIds)
+                    ->delete();
+            }
+
+            DocumentFile::query()
+                ->where('exam_document_id', $examDocument->id)
+                ->delete();
+
+            DocumentProcessingRun::query()
+                ->where('exam_document_id', $examDocument->id)
+                ->delete();
+
+            $examDocument->processingConfig()?->delete();$examDocument->delete();
+        });
+
+        $deletedFileCount = 0;
+        $uniqueFiles = collect($filesToDelete)
+            ->unique(fn (array $item): string => $item['disk'].'::'.$item['path']);
+
+        foreach ($uniqueFiles as$item) {
+            $disk = Storage::disk($item['disk']);
+            if ($disk->exists($item['path'])) {$disk->delete($item['path']);$deletedFileCount++;
+            }
+        }
+
+        return $deletedFileCount;
     }
 }

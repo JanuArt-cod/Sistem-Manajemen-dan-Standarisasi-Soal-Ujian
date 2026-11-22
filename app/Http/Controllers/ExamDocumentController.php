@@ -37,7 +37,7 @@ class ExamDocumentController extends Controller
 
         $documents = ExamDocument::query()
             ->with([
-                'examPeriod:id,name,academic_year',
+                'examPeriod:id,name,academic_year,status',
                 'subject:id,name,code',
                 'schoolClass:id,name',
                 'uploader:id,name',
@@ -59,7 +59,7 @@ class ExamDocumentController extends Controller
             ->orderByDesc('created_at')
             ->paginate(12)
             ->withQueryString()
-            ->through(function (ExamDocument $doc) {
+            ->through(function (ExamDocument $doc) use ($request) {
                 $source = $doc->sourceFile;
                 $outputDocx = $doc->outputDocxFile;
                 $outputPdf = $doc->outputPdfFile;
@@ -74,6 +74,7 @@ class ExamDocumentController extends Controller
                     'class_name' => $doc->schoolClass?->name ?? 'Belum ditentukan',
                     'current_status' => $doc->current_status->value,
                     'status_label' => $doc->current_status->label(),
+                    'can_delete' => $request->user()->can('delete', $doc),
                     'source_file' => $source ? [
                         'id' => $source->id,
                         'original_filename' => $source->original_filename,
@@ -272,6 +273,7 @@ class ExamDocumentController extends Controller
                 'review_notes' => $examDocument->review_notes,
                 'created_at' => $examDocument->created_at?->format('d M Y H:i'),
                 'can_edit' => $canEdit,
+                'can_delete' => $request->user()->can('delete', $examDocument),
                 'can_process' => $canEdit && $source !== null && ! $isBusy,
                 'can_export_pdf' => $canEdit && $outputDocx !== null && ! $isBusy,
                 'can_review' => $canReview,
@@ -408,7 +410,6 @@ class ExamDocumentController extends Controller
         $examDocument->update([
             'subject_id' => $validated['subject_id'] ?? null,
             'school_class_id' => $validated['school_class_id'] ?? null,
-            'teacher_name' => trim($validated['teacher_name']),
             'exam_date' => $validated['exam_date'] ?? null,
             'duration_minutes' => $validated['duration_minutes'] ?? null,
             'document_title' => trim($validated['document_title']),
@@ -418,5 +419,22 @@ class ExamDocumentController extends Controller
         return redirect()
             ->route('exam-documents.show', $examDocument->id)
             ->with('success', 'Metadata dokumen soal berhasil diperbarui.');
+    }
+
+    public function destroy(
+        ExamDocument $examDocument,
+        PrivateDocumentStorageService $storageService
+    ): RedirectResponse {
+        Gate::authorize('delete', $examDocument);
+
+        $title = $examDocument->document_title ?: 'Dokumen soal';
+        $deletedFileCount = $storageService->deleteDocumentWithFiles($examDocument);
+
+        return redirect()
+            ->route('exam-documents.index')
+            ->with(
+                'success',
+                "\"{$title}\" beserta {$deletedFileCount} berkas fisik terkait berhasil dihapus permanen."
+            );
     }
 }

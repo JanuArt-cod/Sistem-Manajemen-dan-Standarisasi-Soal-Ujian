@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Enums\ExamSemester;
 use App\Models\DocumentProcessingConfig;
 use App\Models\DocumentTemplate;
 use App\Models\ExamDocument;
 use App\Models\FormattingPreset;
 use App\Models\SchoolProfile;
 use App\Models\User;
+use Carbon\CarbonInterface;
+use Illuminate\Support\Carbon;
 use RuntimeException;
 
 class FormattingSnapshotBuilder
@@ -22,7 +25,21 @@ class FormattingSnapshotBuilder
         ?User $actor = null
     ): DocumentProcessingConfig {
         $examDocument->loadMissing(['examPeriod', 'subject', 'schoolClass']);
-        $schoolProfile = SchoolProfile::query()->first();
+        $schoolProfile = SchoolProfile::current() ?? SchoolProfile::query()->first();
+
+        $logoPath = $schoolProfile?->getAttribute('logo_path');
+        $logoDisk = $schoolProfile?->getAttribute('logo_disk')
+            ?: (! empty($logoPath) ? 'local' : null);
+
+        $rawSemester = $examDocument->examPeriod?->getAttribute('semester');
+        $semesterEnum = $rawSemester instanceof ExamSemester
+            ? $rawSemester
+            : (is_string($rawSemester) ? ExamSemester::tryFrom($rawSemester) : null);
+        $semesterLabel = $semesterEnum?->label()
+            ?? (is_string($rawSemester) && $rawSemester !== '' ? $rawSemester : null);
+
+        $examDateFormatted = $this->formatIndonesianDate($examDocument->getAttribute('exam_date'));
+        $periodName = $examDocument->examPeriod?->getAttribute('name');
 
         $canonicalPayload = [
             'schema_version' => '1.0',
@@ -76,15 +93,18 @@ class FormattingSnapshotBuilder
                 'website' => $schoolProfile?->getAttribute('website'),
                 'headmaster_name' => $schoolProfile?->getAttribute('headmaster_name'),
                 'headmaster_nip' => $schoolProfile?->getAttribute('headmaster_nip'),
-                'logo_disk' => $schoolProfile?->getAttribute('logo_disk'),
-                'logo_path' => $schoolProfile?->getAttribute('logo_path'),
+                'header_lines' => $schoolProfile?->getAttribute('header_lines') ?? [],
+                'logo_disk' => $logoDisk,
+                'logo_path' => $logoPath,
             ],
             'document' => [
                 'id' => $examDocument->id,
                 'exam_period_id' => $examDocument->exam_period_id,
-                'period_name' => $examDocument->examPeriod?->getAttribute('name'),
+                'period_name' => $periodName,
+                'exam_short_name' => $this->buildShortExamName($periodName, $template->header_title, $semesterLabel),
                 'academic_year' => $examDocument->examPeriod?->getAttribute('academic_year'),
-                'semester' => $examDocument->examPeriod?->getAttribute('semester'),
+                'semester' => $semesterEnum?->value ?? $rawSemester,
+                'semester_label' => $semesterLabel,
                 'subject_id' => $examDocument->subject_id,
                 'subject_name' => $examDocument->subject?->getAttribute('name'),
                 'subject_code' => $examDocument->subject?->getAttribute('code'),
@@ -94,7 +114,7 @@ class FormattingSnapshotBuilder
                 'title' => $examDocument->getAttribute('document_title')
                     ?? $examDocument->getAttribute('title')
                     ?? "Dokumen Soal #{$examDocument->id}",
-                'exam_date' => $examDocument->getAttribute('exam_date'),
+                'exam_date' => $examDateFormatted,
                 'duration_minutes' => $examDocument->getAttribute('duration_minutes'),
             ],
         ];
@@ -142,5 +162,66 @@ class FormattingSnapshotBuilder
         }
 
         return $this->buildAndSave($examDocument, $defaultPreset, $defaultTemplate, $actor);
+    }
+
+    private function formatIndonesianDate(mixed $rawDate): ?string
+    {
+        if ($rawDate === null || $rawDate === '') {
+            return null;
+        }
+
+        try {
+            $date = $rawDate instanceof CarbonInterface
+                ? $rawDate
+                : Carbon::parse((string) $rawDate);
+
+            $days = [
+                0 => 'Minggu',
+                1 => 'Senin',
+                2 => 'Selasa',
+                3 => 'Rabu',
+                4 => 'Kamis',
+                5 => 'Jumat',
+                6 => 'Sabtu',
+            ];
+
+            $months = [
+                1 => 'Januari',
+                2 => 'Februari',
+                3 => 'Maret',
+                4 => 'April',
+                5 => 'Mei',
+                6 => 'Juni',
+                7 => 'Juli',
+                8 => 'Agustus',
+                9 => 'September',
+                10 => 'Oktober',
+                11 => 'November',
+                12 => 'Desember',
+            ];
+
+            $dayName = $days[$date->dayOfWeek] ?? '';
+            $monthName = $months[$date->month] ?? '';
+
+            return sprintf('%s, %02d %s %04d', $dayName, $date->day, $monthName, $date->year);
+        } catch (\Throwable) {
+            return is_string($rawDate) ? trim($rawDate) : null;
+        }
+    }
+
+    private function buildShortExamName(?string $periodName, ?string $headerTitle, ?string $semesterLabel): string
+    {
+        $source = trim((string) ($periodName ?: $headerTitle ?: 'UJIAN'));
+
+        if (preg_match('/\(([^)]+)\)/', $source, $matches)) {
+            $abbr = trim($matches[1]);
+            if ($semesterLabel && stripos($abbr, $semesterLabel) === false && stripos($source, $semesterLabel) !== false) {
+                return "{$abbr} {$semesterLabel}";
+            }
+
+            return $abbr;
+        }
+
+        return $source;
     }
 }

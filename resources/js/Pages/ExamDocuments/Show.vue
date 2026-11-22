@@ -1,5 +1,7 @@
 <script setup>
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
+import ConfirmDialog from '../../Components/ConfirmDialog.vue';
 import DocumentProcessingConfigCard from '../../Components/DocumentProcessingConfigCard.vue';
 import DocumentReviewCard from '../../Components/DocumentReviewCard.vue';
 import PageHeader from '../../Components/PageHeader.vue';
@@ -42,6 +44,8 @@ const form = useForm({
 
 const processForm = useForm({});
 const pdfForm = useForm({});
+const deleteForm = useForm({});
+const showDeleteDialog = ref(false);
 
 const submit = () => {
     form.put(`/exam-documents/${props.document.id}`, {
@@ -58,6 +62,14 @@ const runStandardization = () => {
 const retryPdfExport = () => {
     pdfForm.post(`/exam-documents/${props.document.id}/export-pdf`, {
         preserveScroll: true,
+    });
+};
+
+const confirmDelete = () => {
+    deleteForm.delete(`/exam-documents/${props.document.id}`, {
+        onFinish: () => {
+            showDeleteDialog.value = false;
+        },
     });
 };
 
@@ -106,6 +118,14 @@ const runStatusClass = (status) => {
                 >
                     Unduh Sumber Asli
                 </a>
+                <button
+                    v-if="document.can_delete"
+                    type="button"
+                    @click="showDeleteDialog = true"
+                    class="rounded-lg border border-rose-300 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-100 transition"
+                >
+                    Hapus Dokumen
+                </button>
                 <Link
                     href="/exam-documents"
                     class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -569,5 +589,16 @@ const runStatusClass = (status) => {
                 </div>
             </div>
         </div>
+
+        <ConfirmDialog
+            :show="showDeleteDialog"
+            title="Hapus Dokumen Soal & Seluruh Berkasnya?"
+            :message="`Dokumen '${document.document_title || ''}' beserta berkas sumber asli (.docx), hasil standarisasi (.docx), hasil cetak PDF, dan riwayat eksekusinya akan dihapus permanen dari penyimpanan privat.`"
+            confirm-text="Ya, Hapus Permanen"
+            variant="danger"
+            :processing="deleteForm.processing"
+            @confirm="confirmDelete"
+            @close="showDeleteDialog = false"
+        />
     </AppLayout>
 </template>

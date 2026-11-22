@@ -1,6 +1,7 @@
 <script setup>
 import { Head, Link, router } from '@inertiajs/vue3';
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
+import ConfirmDialog from '../../Components/ConfirmDialog.vue';
 import EmptyState from '../../Components/EmptyState.vue';
 import PageHeader from '../../Components/PageHeader.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
@@ -41,6 +42,9 @@ const filterForm = reactive({
     status: props.filters.status || '',
 });
 
+const deleteTarget = ref(null);
+const deleting = ref(false);
+
 const applyFilters = () => {
     router.get('/exam-documents', filterForm, {
         preserveState: true,
@@ -55,6 +59,31 @@ const resetFilters = () => {
     filterForm.class_id = '';
     filterForm.status = '';
     applyFilters();
+};
+
+const openDeleteDialog = (doc) => {
+    deleteTarget.value = doc;
+};
+
+const closeDeleteDialog = () => {
+    if (!deleting.value) {
+        deleteTarget.value = null;
+    }
+};
+
+const confirmDeleteDocument = () => {
+    if (!deleteTarget.value) {
+        return;
+    }
+
+    deleting.value = true;
+    router.delete(`/exam-documents/${deleteTarget.value.id}`, {
+        preserveScroll: true,
+        onFinish: () => {
+            deleting.value = false;
+            deleteTarget.value = null;
+        },
+    });
 };
 </script>
 
@@ -171,7 +200,7 @@ const resetFilters = () => {
                         <td class="px-5 py-3.5">
                             <StatusBadge :status="doc.current_status" :label="doc.status_label" />
                         </td>
-                        <td class="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
+                        <td class="px-5 py-3.5 text-right space-x-1.5 whitespace-nowrap">
                             <a
                                 v-if="doc.output_pdf_file"
                                 :href="doc.output_pdf_file.download_url"
@@ -199,6 +228,14 @@ const resetFilters = () => {
                             >
                                 Detail
                             </Link>
+                            <button
+                                v-if="doc.can_delete"
+                                type="button"
+                                @click="openDeleteDialog(doc)"
+                                class="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                            >
+                                Hapus
+                            </button>
                         </td>
                     </tr>
                 </tbody>
@@ -220,5 +257,16 @@ const resetFilters = () => {
                 </div>
             </div>
         </div>
+
+        <ConfirmDialog
+            :show="deleteTarget !== null"
+            title="Hapus Dokumen & Berkas Fisik?"
+            :message="`Dokumen '${deleteTarget?.document_title || ''}' beserta seluruh berkas sumber asli (.docx), hasil standarisasi (.docx), hasil PDF, dan riwayat prosesnya akan dihapus permanen dari penyimpanan privat.`"
+            confirm-text="Ya, Hapus Permanen"
+            variant="danger"
+            :processing="deleting"
+            @confirm="confirmDeleteDocument"
+            @close="closeDeleteDialog"
+        />
     </AppLayout>
 </template>
